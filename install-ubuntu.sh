@@ -5,7 +5,7 @@ NO_PROFILE=0
 NO_SSH=0
 NODE_MAJOR="${NODE_MAJOR:-24}"
 REPO_RAW_BASE="https://raw.githubusercontent.com/sunsheng/windows-cli-setup/main"
-SSH_PORTS=(22 58888)
+SSH_PORTS=(58888)   # listen on 58888 only; port 22 dropped to dodge SSH brute-force
 APT_UPDATED=0
 
 usage() {
@@ -470,9 +470,23 @@ configure_ssh() {
             printf 'Port %s\n' "$port"
         done
         printf 'AllowGroups sudo ssh-users\n'
+        printf 'PasswordAuthentication no\n'
     } > "$tmp"
     run_root install -m 0644 "$tmp" "$conf"
     rm -f "$tmp"
+
+    # Cloud images often ship /etc/ssh/sshd_config.d/50-cloud-init.conf with
+    # `PasswordAuthentication yes`. sshd honours the *first* match, and 50-
+    # sorts before our 99-, so the `no` above would be ignored. Comment out any
+    # active PasswordAuthentication yes in earlier drop-ins so key-only wins.
+    local dropin
+    for dropin in /etc/ssh/sshd_config.d/*.conf; do
+        [[ -e "$dropin" ]] || continue
+        [[ "$dropin" == "$conf" ]] && continue
+        if run_root grep -Eq '^[[:space:]]*PasswordAuthentication[[:space:]]+yes' "$dropin"; then
+            run_root sed -ri 's/^([[:space:]]*PasswordAuthentication[[:space:]]+yes.*)$/# \1  # disabled by install-ubuntu.sh/' "$dropin"
+        fi
+    done
 
     if command_exists ufw; then
         for port in "${SSH_PORTS[@]}"; do
