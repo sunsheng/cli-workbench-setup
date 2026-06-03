@@ -89,7 +89,8 @@ jobs:
           # SIGPIPE its upstream and trip pipefail even on success).
           groups_list=" $(id -nG ciuser 2>/dev/null) "
           if [[ "$groups_list" != *" sudo "* ]]; then echo "::error::ciuser not in sudo group:$groups_list"; rc=1; fi
-          if [[ ! -f /etc/sudoers.d/90-ciuser-nopasswd ]]; then echo "::error::sudoers drop-in missing"; rc=1; fi
+          # Needs sudo: /etc/sudoers.d is mode 0750 root, unreadable to the runner user.
+          if ! sudo test -f /etc/sudoers.d/90-ciuser-nopasswd; then echo "::error::sudoers drop-in missing"; rc=1; fi
           if ! sudo visudo -cf /etc/sudoers.d/90-ciuser-nopasswd; then echo "::error::visudo check failed"; rc=1; fi
           # The whole point: sudo without a password prompt.
           if ! sudo -n -u ciuser sudo -n true; then echo "::error::passwordless sudo not working"; rc=1; fi
