@@ -11,7 +11,7 @@ jobs:
     name: Windows lint
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Parse PowerShell scripts
         shell: pwsh
@@ -44,7 +44,7 @@ jobs:
     name: Ubuntu lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Parse bash scripts
         shell: bash
@@ -65,7 +65,7 @@ jobs:
     name: Windows install + verify
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Run installer (-NoSsh)
         shell: pwsh
@@ -97,7 +97,7 @@ jobs:
     name: Ubuntu install + verify
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Run installer (--no-ssh)
         shell: bash

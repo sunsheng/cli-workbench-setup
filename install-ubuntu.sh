@@ -82,7 +82,11 @@ if [[ -n "$SCRIPT_SOURCE" ]]; then
     if [[ "$SCRIPT_SOURCE" != /* ]]; then
         SCRIPT_SOURCE="$PWD/$SCRIPT_SOURCE"
     fi
-    SCRIPT_DIR="$(cd -P -- "$(dirname -- "$SCRIPT_SOURCE")" >/dev/null 2>&1 && pwd -P || true)"
+    if SCRIPT_DIR="$(cd -P -- "$(dirname -- "$SCRIPT_SOURCE")" >/dev/null 2>&1 && pwd -P)"; then
+        :
+    else
+        SCRIPT_DIR=""
+    fi
     if [[ ! -f "$SCRIPT_DIR/config/bashrc" ]]; then
         SCRIPT_DIR=""
     fi
@@ -164,7 +168,8 @@ install_user_file() {
     dst_dir="$(dirname -- "$dst")"
     target_mkdir "$dst_dir"
     if [[ -e "$dst" ]]; then
-        local backup="$dst.bak-$(date +%Y%m%d-%H%M%S)"
+        local backup
+        backup="$dst.bak-$(date +%Y%m%d-%H%M%S)"
         cp -a "$dst" "$backup"
         chown_target "$backup"
         printf '    Existing file backed up to %s\n' "$backup"
@@ -177,7 +182,7 @@ ensure_bashrc_source() {
     local bashrc="$TARGET_HOME/.bashrc"
     local begin="# >>> cli-setup >>>"
     local end="# <<< cli-setup <<<"
-    local source_line='[ -r "$HOME/.bashrc.d/cli-setup.bash" ] && . "$HOME/.bashrc.d/cli-setup.bash"'
+    local source_line="[ -r \"\$HOME/.bashrc.d/cli-setup.bash\" ] && . \"\$HOME/.bashrc.d/cli-setup.bash\""
 
     if [[ -f "$bashrc" ]] && grep -Fq "$begin" "$bashrc"; then
         skip ".bashrc already sources cli-setup."
@@ -288,6 +293,7 @@ install_tools() {
 
     local packages=(
         build-essential
+        bat
         ca-certificates
         curl
         fd-find
