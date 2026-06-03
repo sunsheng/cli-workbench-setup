@@ -25,6 +25,8 @@
 | vim | `vim` | 安装 | 安装 | 文本编辑器 |
 | zoxide | `z` | 安装 | 安装 | 智能 `cd` |
 | Node.js LTS | `node` / `npm` / `npx` | 安装或复用已有 24.x+ | 安装或复用已有 24.x+ | JavaScript/Node 开发运行时 |
+| Codex CLI | `codex` | 官网脚本安装，npm 兜底 | 官网脚本安装，npm 兜底 | OpenAI Codex 命令行编码助手 |
+| Claude Code CLI | `claude` | 官网脚本安装，npm 兜底 | 官网脚本安装，npm 兜底 | Anthropic Claude Code 命令行编码助手 |
 | build-essential | `gcc` / `make` | 不需要 | 安装 | Ubuntu 常用 native build 工具 |
 | PSFzf | PowerShell 模块 | 安装 | 不需要 | PowerShell 的 fzf/PSReadLine 集成 |
 | PowerShell 7 | `pwsh` | **需预先安装** | 不安装 | Windows SSH 默认 shell 使用 |
@@ -94,21 +96,23 @@ Ubuntu 脚本会使用 `sudo` 安装系统包。默认 Node.js 目标为 24.x LT
 3. 添加 `extras` bucket
 4. 安装常用 CLI 工具
 5. 确保 Node.js LTS、`npm`、`npx` 可用
-6. 安装 `PSFzf` 模块
-7. 复制 `config/Microsoft.PowerShell_profile.ps1` 到 `$PROFILE`，已有文件自动备份为 `*.bak-<时间戳>`
-8. 复制 `config/_vimrc` 到 `$HOME\_vimrc`，并创建 `vimfiles\undo`
-9. 管理员会话下配置 OpenSSH Server：启用 `sshd`、监听 `22` + `58888`、限制登录组、放行防火墙、把 SSH 默认 shell 设为 `pwsh`
+6. 安装 Codex CLI 与 Claude Code CLI：优先使用官网安装脚本，失败后使用 npm 包兜底
+7. 安装 `PSFzf` 模块
+8. 复制 `config/Microsoft.PowerShell_profile.ps1` 到 `$PROFILE`，已有文件自动备份为 `*.bak-<时间戳>`
+9. 复制 `config/_vimrc` 到 `$HOME\_vimrc`，并创建 `vimfiles\undo`
+10. 管理员会话下配置 OpenSSH Server：启用 `sshd`、监听 `22` + `58888`、限制登录组、放行防火墙、把 SSH 默认 shell 设为 `pwsh`
 
 ### Ubuntu Server 安装内容
 
 1. 启用 Ubuntu `universe` 源并安装 apt 依赖
 2. 安装常用 CLI 工具、`build-essential`、`unzip`
 3. 确保 Node.js 24.x LTS、`npm`、`npx` 可用
-4. 为 Debian/Ubuntu 的 `fdfind` / `batcat` 创建用户级 `fd` / `bat` shim
-5. 安装 `config/bashrc` 到 `~/.bashrc.d/cli-setup.bash`，并在 `~/.bashrc` 追加幂等 source 块
-6. 安装 `config/vimrc` 到 `~/.vimrc`，并创建 `~/.vim/undo`
-7. 默认安装并配置 OpenSSH Server：监听 `22` + `58888`，创建 `ssh-users` 组，把当前用户加入该组，写入 `/etc/ssh/sshd_config.d/99-cli-setup.conf`
-8. 如果系统已有 `ufw`，为 `22/tcp` 和 `58888/tcp` 添加 allow 规则；不会主动安装或启用 `ufw`
+4. 安装 Codex CLI 与 Claude Code CLI：优先使用官网安装脚本，失败后使用 npm 包兜底
+5. 为 Debian/Ubuntu 的 `fdfind` / `batcat` 创建用户级 `fd` / `bat` shim
+6. 安装 `config/bashrc` 到 `~/.bashrc.d/cli-setup.bash`，并在 `~/.bashrc` 追加幂等 source 块
+7. 安装 `config/vimrc` 到 `~/.vimrc`，并创建 `~/.vim/undo`
+8. 默认安装并配置 OpenSSH Server：监听 `22` + `58888`，创建 `ssh-users` 组，把当前用户加入该组，写入 `/etc/ssh/sshd_config.d/99-cli-setup.conf`
+9. 如果系统已有 `ufw`，为 `22/tcp` 和 `58888/tcp` 添加 allow 规则；不会主动安装或启用 `ufw`
 
 ## 使用说明
 
@@ -156,6 +160,8 @@ zi            # 交互式选择历史目录（配合 fzf）
 | Ctrl+T | 模糊查找当前目录文件 | 模糊查找当前目录文件 |
 | Ctrl+D | 空命令行退出 shell | bash 默认 EOF 行为 |
 
+Ubuntu 侧会在交互式 bash 中 source fzf 的 `key-bindings.bash` 与 `completion.bash`，为 Ctrl+R / Ctrl+T 提供和 Windows PowerShell 侧相同的模糊历史/文件选择体验。
+
 ### JSON / 压缩 / Node.js
 
 ```bash
@@ -164,6 +170,8 @@ something | jq '.key'
 node --version
 npm --version
 npx --version
+codex --version
+claude --version
 ```
 
 ### Git 别名（oh-my-zsh 风格，仅查看类）
@@ -256,6 +264,7 @@ sudo apt remove <name>
 - **图标 / Nerd Font 装在客户端，不装在服务器**：`eza --icons` 需要客户端终端使用 Nerd Font。Windows Terminal 或 VS Code 集成终端中选择 FiraCode Nerd Font、JetBrainsMono Nerd Font 等即可。
 - **Ubuntu 不安装 `pwsh`**：Ubuntu Server 默认使用 bash；`pwsh` 只用于 Windows OpenSSH 的默认 shell。
 - **Node.js**：默认按 Node.js 24.x LTS 处理。Windows 使用 Scoop `nodejs-lts`；Ubuntu 使用 NodeSource apt 仓库。已有足够新的 `node` / `npm` / `npx` 会被复用。
+- **Codex CLI / Claude Code CLI**：安装器优先使用官方脚本。Codex 使用 `https://chatgpt.com/codex/install.*`，Claude Code 使用 `https://claude.ai/install.*`；如果官网脚本不可用，会退回到 `npm install -g @openai/codex` 与 `npm install -g @anthropic-ai/claude-code`。
 - **SSH 分组限制**：Ubuntu 侧会写入 `AllowGroups sudo ssh-users`。这和 Windows 侧限制管理员/openssh 用户组的思路一致，但会影响已有非 sudo 用户的 SSH 登录，需要把他们加入 `ssh-users`。
 
 ## 持续集成（CI）
@@ -264,8 +273,8 @@ sudo apt remove <name>
 
 1. Windows lint：解析 `install.ps1` 与 PowerShell profile，并运行 PSScriptAnalyzer。
 2. Ubuntu lint：`bash -n` 检查 bash 脚本与配置，并运行 ShellCheck。
-3. Windows install：在 `windows-latest` 上执行 `.\install.ps1 -NoSsh`，验证 CLI、Node.js、profile 和 git 快捷方式。
-4. Ubuntu install：在 `ubuntu-latest` 上执行 `bash ./install-ubuntu.sh --no-ssh`，验证 CLI、Node.js、bash 配置和 git 快捷方式。
+3. Windows install：在 `windows-latest` 上执行 `.\install.ps1 -NoSsh`，验证 CLI、Node.js、Codex CLI、Claude Code CLI、profile 和 git 快捷方式。
+4. Ubuntu install：在 `ubuntu-latest` 上执行 `bash ./install-ubuntu.sh --no-ssh`，验证 CLI、Node.js、Codex CLI、Claude Code CLI、bash 配置、fzf Ctrl+R/Ctrl+T 绑定和 git 快捷方式。
 
 ## License
 

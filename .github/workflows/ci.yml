@@ -75,7 +75,7 @@ jobs:
         shell: pwsh
         run: |
           $env:Path = "$env:USERPROFILE\scoop\shims;$env:Path"
-          $tools = 'git', 'gh', 'rg', 'fd', 'bat', 'fzf', 'jq', '7z', 'eza', 'vim', 'zoxide', 'node', 'npm', 'npx'
+          $tools = 'git', 'gh', 'rg', 'fd', 'bat', 'fzf', 'jq', '7z', 'eza', 'vim', 'zoxide', 'node', 'npm', 'npx', 'codex', 'claude'
           $missing = @()
           foreach ($t in $tools) {
             if (Get-Command $t -ErrorAction SilentlyContinue) { Write-Host "OK: $t" }
@@ -110,7 +110,7 @@ jobs:
         run: |
           set -euo pipefail
           export PATH="$HOME/.local/bin:$PATH"
-          tools=(git gh rg fd bat fzf jq 7z eza vim zoxide node npm npx)
+          tools=(git gh rg fd bat fzf jq 7z eza vim zoxide node npm npx codex claude)
           missing=()
           for tool in "${tools[@]}"; do
             if command -v "$tool" >/dev/null 2>&1; then
@@ -134,3 +134,17 @@ jobs:
             type "$name" >/dev/null
             echo "OK: $name"
           done
+
+      - name: Verify Ubuntu fzf key bindings
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash -ic '
+            set -e
+            export PATH="$HOME/.local/bin:$PATH"
+            source "$HOME/.bashrc.d/cli-setup.bash"
+            type __fzf_select__ >/dev/null
+            bind -m emacs-standard -p | grep -F "__fzf_select__" >/dev/null
+            bind -m emacs-standard -p | grep -F "__fzf_history__" >/dev/null
+            echo "fzf Ctrl+T/Ctrl+R bindings loaded"
+          '

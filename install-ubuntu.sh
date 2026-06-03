@@ -96,6 +96,20 @@ run_root() {
     "${SUDO[@]}" "$@"
 }
 
+run_target_user() {
+    if [[ "$(id -u)" -eq 0 && "$TARGET_USER" != "root" ]]; then
+        if command_exists runuser; then
+            runuser -u "$TARGET_USER" -- env HOME="$TARGET_HOME" PATH="$USER_BIN:$PATH" "$@"
+        elif command_exists sudo; then
+            sudo -u "$TARGET_USER" -H env HOME="$TARGET_HOME" PATH="$USER_BIN:$PATH" "$@"
+        else
+            die "runuser or sudo is required to install user-scoped CLI tools for '$TARGET_USER'."
+        fi
+    else
+        env HOME="$TARGET_HOME" PATH="$USER_BIN:$PATH" "$@"
+    fi
+}
+
 apt_update_once() {
     if [[ "$APT_UPDATED" -eq 0 ]]; then
         step "Updating apt metadata..."
@@ -221,6 +235,17 @@ ensure_user_bin_links() {
     export PATH="$USER_BIN:$PATH"
 }
 
+ensure_npm_user_prefix() {
+    command_exists npm || die "npm is required for AI CLI npm fallback."
+    target_mkdir "$TARGET_HOME/.local"
+    local prefix=""
+    prefix="$(run_target_user npm config get prefix 2>/dev/null || true)"
+    if [[ -z "$prefix" || "$prefix" == /usr || "$prefix" == /usr/* || ! -w "$prefix" ]]; then
+        run_target_user npm config set prefix "$TARGET_HOME/.local"
+    fi
+    export PATH="$USER_BIN:$PATH"
+}
+
 node_major_version() {
     node -p "Number(process.versions.node.split('.')[0])" 2>/dev/null || true
 }
@@ -257,6 +282,56 @@ install_nodejs() {
 
     setup_nodesource
     apt_install nodejs
+}
+
+install_codex_cli() {
+    step "Ensuring Codex CLI..."
+    export PATH="$USER_BIN:$PATH"
+    if command_exists codex; then
+        skip "codex already installed."
+        return
+    fi
+
+    if run_target_user sh -lc 'set -e; tmp="$(mktemp)"; trap "rm -f \"$tmp\"" EXIT; curl -fsSL https://chatgpt.com/codex/install.sh -o "$tmp"; CODEX_NON_INTERACTIVE=1 CODEX_INSTALL_DIR="$HOME/.local/bin" sh "$tmp"'; then
+        :
+    else
+        warn "Codex official installer failed; falling back to npm."
+        ensure_npm_user_prefix
+        run_target_user npm install -g @openai/codex
+    fi
+
+    export PATH="$USER_BIN:$PATH"
+    if ! command_exists codex; then
+        warn "codex command still not found after official installer; falling back to npm."
+        ensure_npm_user_prefix
+        run_target_user npm install -g @openai/codex
+    fi
+    command_exists codex || die "codex was not found after installation."
+}
+
+install_claude_code_cli() {
+    step "Ensuring Claude Code CLI..."
+    export PATH="$USER_BIN:$PATH"
+    if command_exists claude; then
+        skip "claude already installed."
+        return
+    fi
+
+    if run_target_user sh -lc 'set -e; tmp="$(mktemp)"; trap "rm -f \"$tmp\"" EXIT; curl -fsSL https://claude.ai/install.sh -o "$tmp"; bash "$tmp"'; then
+        :
+    else
+        warn "Claude Code official installer failed; falling back to npm."
+        ensure_npm_user_prefix
+        run_target_user npm install -g @anthropic-ai/claude-code
+    fi
+
+    export PATH="$USER_BIN:$PATH"
+    if ! command_exists claude; then
+        warn "claude command still not found after official installer; falling back to npm."
+        ensure_npm_user_prefix
+        run_target_user npm install -g @anthropic-ai/claude-code
+    fi
+    command_exists claude || die "claude was not found after installation."
 }
 
 install_eza_release() {
@@ -325,6 +400,8 @@ install_tools() {
 
     install_nodejs
     ensure_user_bin_links
+    install_codex_cli
+    install_claude_code_cli
 }
 
 install_profile() {
