@@ -10,6 +10,7 @@
 |------|------|------|
 | [Scoop](https://scoop.sh) | `scoop` | 包管理器 |
 | [git](https://git-scm.com) | `git` | 版本控制 |
+| [GitHub CLI](https://cli.github.com) | `gh` | GitHub 命令行工具 |
 | [ripgrep](https://github.com/BurntSushi/ripgrep) | `rg` | 极快的递归文本搜索 |
 | [fd](https://github.com/sharkdp/fd) | `fd` | 极快的文件查找（`find` 替代） |
 | [bat](https://github.com/sharkdp/bat) | `bat` | 带语法高亮的 `cat` |
@@ -18,8 +19,10 @@
 | [7-Zip](https://www.7-zip.org) | `7z` | 压缩/解压 |
 | [eza](https://github.com/eza-community/eza) | `eza` | 现代 `ls` / `tree` |
 | [lsd](https://github.com/lsd-rs/lsd) | `lsd` | 另一个现代 `ls` |
+| [vim](https://www.vim.org) | `vim` | 文本编辑器 |
 | [zoxide](https://github.com/ajeetdsouza/zoxide) | `z` | 智能 `cd` |
 | [PSFzf](https://github.com/kelleyma49/PSFzf) | — | fzf 与 PSReadLine 集成（Ctrl+R / Ctrl+T） |
+| [FiraCode Nerd Font](https://www.nerdfonts.com/) | — | 带图标/连字的等宽字体（供 `eza --icons` 等使用） |
 
 ## 快速安装
 
@@ -40,10 +43,11 @@ cd windows-cli-setup
 脚本会：
 
 1. 安装 Scoop（若未安装；在管理员会话下自动加 `-RunAsAdmin`）
-2. 添加 `extras` bucket
-3. 安装上表中的所有工具
-4. 安装 `PSFzf` 模块
-5. 把 `config/Microsoft.PowerShell_profile.ps1` 复制到你的 `$PROFILE`（已有的会自动备份为 `*.bak-<时间戳>`）
+2. 添加 `extras` 和 `nerd-fonts` bucket
+3. 安装 FiraCode Nerd Font 字体
+4. 安装上表中的所有工具
+5. 安装 `PSFzf` 模块
+6. 把 `config/Microsoft.PowerShell_profile.ps1` 复制到你的 `$PROFILE`（已有的会自动备份为 `*.bak-<时间戳>`）
 
 > 脚本可重复运行——每一步都会先检查是否已安装。
 >
@@ -56,13 +60,14 @@ cd windows-cli-setup
 ### 列表与树形（eza）
 
 ```powershell
-ls                 # 简洁列表（目录优先）
+ls                 # 简洁列表（目录优先，带图标）
 ll                 # 详细列表，含隐藏文件 + git 状态
 la                 # 显示所有文件
 lt                 # 树形，限 2 层（替代 tree）
 tree               # 完整树形
-eza --icons -la    # 带图标（需安装 Nerd Font 字体）
 ```
+
+> 以上函数已默认带 `--icons`，图标需终端使用 Nerd Font 字体才能正常显示——脚本已自动安装 FiraCode Nerd Font，把终端字体设为 **FiraCode Nerd Font** 即可。
 
 ### 查看文件（bat）
 
@@ -131,8 +136,12 @@ scoop uninstall <name>  # 卸载
 
 ## 备注
 
-- 图标默认未开启（`--icons`），因为终端需使用 [Nerd Font](https://www.nerdfonts.com/) 字体才能正常显示图标。装好字体后可在 profile 各函数里加 `--icons` 参数。
-- profile 使用 `function` 而非 `Set-Alias`，以便携带默认参数（如 `--git`、`--tree --level=2`）。
+- 图标已默认开启（profile 中各 eza 函数带 `--icons`）。脚本会安装 [FiraCode Nerd Font](https://www.nerdfonts.com/)，但**需手动把终端字体设为 “FiraCode Nerd Font”** 图标才会正常显示（否则会看到方框/乱码）。
+  - Windows Terminal：`设置 → 配置文件 → 外观 → 字体`
+  - VS Code 集成终端：`"terminal.integrated.fontFamily": "FiraCode Nerd Font"`
+  - 想换字体？`scoop search nerd-fonts/` 查可装项，如 `scoop install nerd-fonts/JetBrainsMono-NF`。
+- **SSH 远程使用**：图标字形由你正在敲字的那个**客户端终端**渲染，与服务器无关。从别的机器 ssh 进来时，要在**那台客户端**装并选用 Nerd Font，服务器装字体没用。profile 已强制 UTF-8 输出（`[Console]::OutputEncoding`），避免 SSH 会话以非 UTF-8 codepage 启动时把图标错码成 `?`。
+- profile 使用 `function` 而非 `Set-Alias`，以便携带默认参数（如 `--icons`、`--git`、`--tree --level=2`）。
 
 ## License
 
