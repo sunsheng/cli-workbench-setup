@@ -94,18 +94,26 @@ if [[ -z "$INSTALLER" ]]; then
     INSTALLER="$(mktemp)"
     FETCHED=1
     curl -fsSL "$REPO_RAW_BASE/install-ubuntu.sh" -o "$INSTALLER"
-    chmod 0644 "$INSTALLER"   # readable by the new user when run from /tmp
 fi
 
-# Run as the new user. --no-ssh is hardcoded on purpose: this runs over a remote
-# root session, and silently switching sshd to 58888 / key-only could lock you
-# out. Run install-ubuntu.sh yourself later if you want SSH hardening.
+# Run as the new user. The installer is fed via stdin (bash -s) rather than by
+# path: a clone often lives somewhere the new user can't traverse (e.g. /root,
+# mode 0700, or another user's home), so `bash <path>` as the new user would hit
+# "Permission denied". With stdin, our (root) shell opens the file and the new
+# user just inherits the fd.
+#
+# --no-ssh is hardcoded on purpose: this runs over a remote root session, and
+# silently switching sshd to 58888 / key-only could lock you out. Run
+# install-ubuntu.sh yourself later if you want SSH hardening.
 step "Installing CLI environment as '$NEW_USER' (this also installs claude / codex)..."
 RC=0
 if [[ "$(id -u)" -eq 0 ]] && command_exists runuser; then
-    runuser -u "$NEW_USER" -- env -u SUDO_USER HOME="$NEW_HOME" bash "$INSTALLER" --no-ssh || RC=$?
+    runuser -u "$NEW_USER" -- env -u SUDO_USER HOME="$NEW_HOME" bash -s -- --no-ssh < "$INSTALLER" || RC=$?
 else
-    sudo -u "$NEW_USER" -H env -u SUDO_USER bash "$INSTALLER" --no-ssh || RC=$?
+    # SC2024: the redirect is intentionally opened by *our* shell (which can read
+    # $INSTALLER), not by the dropped-privilege user — that is the whole point here.
+    # shellcheck disable=SC2024
+    sudo -u "$NEW_USER" -H env -u SUDO_USER bash -s -- --no-ssh < "$INSTALLER" || RC=$?
 fi
 if ((FETCHED)); then
     rm -f "$INSTALLER"
