@@ -63,7 +63,44 @@ OpenSSH Server 步骤需要管理员权限；普通会话会自动跳过 SSH 配
 
 ### Ubuntu Server
 
-在 bash 中运行：
+`claude --dangerously-skip-permissions` **拒绝以 root/sudo 身份运行**。而很多云主机默认就是 root 登录，直接拿 `install-ubuntu.sh` 装会把环境装到 root 名下，`claude` 照样跑不起来。因此分两种情况：
+
+#### 情况一：你现在是 root（推荐，云主机默认）
+
+用 `create-user-ubuntu.sh` 一键**创建一个带免密 sudo 的普通用户，并把整套环境（CLI 工具 + `claude` / `codex` + bash/vim 配置）装到该用户名下**。脚本没有任何开关，唯一可选参数是用户名（默认 `dev`）：
+
+```bash
+# 以 root 运行
+curl -fsSL https://raw.githubusercontent.com/sunsheng/windows-cli-setup/main/create-user-ubuntu.sh | bash          # 创建用户 dev
+curl -fsSL https://raw.githubusercontent.com/sunsheng/windows-cli-setup/main/create-user-ubuntu.sh | bash -s myname  # 或指定用户名
+```
+
+或克隆仓库后本地执行：
+
+```bash
+git clone https://github.com/sunsheng/windows-cli-setup.git
+cd windows-cli-setup
+bash ./create-user-ubuntu.sh          # 创建用户 dev
+bash ./create-user-ubuntu.sh myname   # 或指定用户名
+```
+
+随后切到该用户即可正常使用：
+
+```bash
+sudo -iu dev
+claude --dangerously-skip-permissions
+```
+
+`create-user-ubuntu.sh` 的行为：
+
+1. 用 `adduser --disabled-password` 创建用户（不存在才创建），加入 `sudo` 组。
+2. 写入 `/etc/sudoers.d/90-<user>-nopasswd`（`NOPASSWD:ALL`，`0440`），写前用 `visudo -cf` 校验，写后再 `visudo -c` 全量校验，避免写坏锁死 sudo。
+3. 以新用户身份运行 `install-ubuntu.sh` 安装环境。**内部固定带 `--no-ssh`**：脚本通常跑在远程 root 会话里，自动把 sshd 切到 58888、禁用密码登录有把自己锁在门外的风险，所以默认不动 SSH。需要 SSH 加固时，切到该用户后单独跑一次 `install-ubuntu.sh` 即可。
+4. 新用户默认禁用密码登录（`--disabled-password`）；如需密码登录，自行 `sudo passwd <user>`。
+
+#### 情况二：你已经是带 sudo 的普通用户
+
+直接给当前用户安装环境：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/sunsheng/windows-cli-setup/main/install-ubuntu.sh | bash
@@ -85,7 +122,7 @@ bash ./install-ubuntu.sh --no-ssh       # 不安装/配置 OpenSSH Server
 NODE_MAJOR=22 bash ./install-ubuntu.sh  # 如需固定到 Node.js 22.x
 ```
 
-Ubuntu 脚本会使用 `sudo` 安装系统包。默认 Node.js 目标为 24.x LTS；如果系统已有 `node` + `npm` + `npx` 且主版本不低于 24，会直接复用。
+Ubuntu 脚本会使用 `sudo` 安装系统包，并把 `claude` / `codex` 等用户级工具装到**当前用户**（`$SUDO_USER`，即你而非 root）名下。默认 Node.js 目标为 24.x LTS；如果系统已有 `node` + `npm` + `npx` 且主版本不低于 24，会直接复用。
 
 ## 脚本行为
 
@@ -104,6 +141,7 @@ Ubuntu 脚本会使用 `sudo` 安装系统包。默认 Node.js 目标为 24.x LT
 
 ### Ubuntu Server 安装内容
 
+0. 生成 UTF-8 locale（消除 SSH `setlocale: cannot change locale` 警告）：安装 `locales`，确保生成 `en_US.UTF-8` 与 `zh_CN.UTF-8`，并把**本次 SSH 会话转发进来的任意 UTF-8 locale**（如客户端发来的 `LC_ALL=zh_CN.UTF-8`）一并生成；系统无默认 locale 时设 `LANG=en_US.UTF-8`（不覆盖已有值）
 1. 启用 Ubuntu `universe` 源并安装 apt 依赖
 2. 安装常用 CLI 工具、`build-essential`、`unzip`
 3. 确保 Node.js 24.x LTS、`npm`、`npx` 可用
@@ -228,6 +266,7 @@ sudo systemctl restart ssh
 windows-cli-setup/
 ├── install.ps1                              # Windows 一键安装脚本
 ├── install-ubuntu.sh                        # Ubuntu Server 一键安装脚本
+├── create-user-ubuntu.sh                    # Ubuntu 创建免密 sudo 用户并为其安装环境
 ├── config/
 │   ├── Microsoft.PowerShell_profile.ps1     # PowerShell 配置
 │   ├── _vimrc                               # Windows Vim 配置
@@ -304,6 +343,7 @@ ls ~/Library/Fonts | grep -i nerd
 - **Node.js**：默认按 Node.js 24.x LTS 处理。Windows 使用 Scoop `nodejs-lts`；Ubuntu 使用 NodeSource apt 仓库。已有足够新的 `node` / `npm` / `npx` 会被复用。
 - **Codex CLI**：安装器优先使用官方脚本 `https://chatgpt.com/codex/install.*`，不可用时退回到 `npm install -g @openai/codex`。
 - **Claude Code CLI**：采用三级兜底。① 优先**直接从 `https://downloads.claude.ai/claude-code-releases` 拉原生二进制**（取 `latest` 版本号 → 下载对应平台二进制 → 用 `manifest.json` 里的 SHA256 校验 → 运行内置 `claude install`）；② 失败时退回官方入口脚本 `https://claude.ai/install.*`；③ 再失败才用 `npm install -g @anthropic-ai/claude-code`。之所以原生优先，是因为入口脚本 `claude.ai/install.*` 挂在 Cloudflare 托管质询（managed challenge）后面，**数据中心/云主机 IP（如阿里云、各云厂商）裸 `curl` 会被 403 挡住**，而 `downloads.claude.ai` 没有这层质询，能直接下载。原生安装的另一个好处是会**后台自动更新**。
+- **UTF-8 locale**：`setlocale: cannot change locale (zh_CN.UTF-8)` 这类警告，是 SSH **客户端把本地 `LC_*` 环境变量转发到了服务器**，而服务器没生成对应 locale 导致的。Ubuntu 脚本会在服务器上生成 `en_US.UTF-8`、`zh_CN.UTF-8` 以及本次会话转发进来的 UTF-8 locale，从根上消除警告（也可在客户端 `~/.ssh/config` 里去掉 `SendEnv LANG LC_*` 不转发，但那只是绕过）。
 - **SSH 分组限制**：Ubuntu 侧会写入 `AllowGroups sudo ssh-users`。这和 Windows 侧限制管理员/openssh 用户组的思路一致，但会影响已有非 sudo 用户的 SSH 登录，需要把他们加入 `ssh-users`。
 
 ## 持续集成（CI）
@@ -311,7 +351,8 @@ ls ~/Library/Fonts | grep -i nerd
 仓库带有 GitHub Actions 工作流 `.github/workflows/ci.yml`：
 
 1. Windows lint：解析 `install.ps1` 与 PowerShell profile，并运行 PSScriptAnalyzer。
-2. Ubuntu lint：`bash -n` 检查 bash 脚本与配置，并运行 ShellCheck。
+2. Ubuntu lint：`bash -n` 检查 `install-ubuntu.sh`、`create-user-ubuntu.sh` 与配置，并运行 ShellCheck。
+2.5. Ubuntu create-user：以 root 执行 `create-user-ubuntu.sh`，校验用户、`sudo` 组、免密 sudo（`sudo -n`），以及 `claude` / `codex` 已装到新用户名下。
 3. Windows install：在 `windows-latest` 上执行 `.\install.ps1 -NoSsh`，验证 CLI、Node.js、Codex CLI、Claude Code CLI、profile 和 git 快捷方式。
 4. Ubuntu install：在 `ubuntu-latest` 上执行 `bash ./install-ubuntu.sh --no-ssh`，验证 CLI、Node.js、Codex CLI、Claude Code CLI、bash 配置、fzf Ctrl+R/Ctrl+T 绑定和 git 快捷方式。
 

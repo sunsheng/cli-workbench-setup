@@ -55,6 +55,7 @@ jobs:
         run: |
           set -euo pipefail
           bash -n install-ubuntu.sh
+          bash -n create-user-ubuntu.sh
           bash -n config/bashrc
 
       - name: ShellCheck
@@ -63,7 +64,54 @@ jobs:
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install -y shellcheck
-          shellcheck -s bash install-ubuntu.sh config/bashrc
+          shellcheck -s bash install-ubuntu.sh create-user-ubuntu.sh config/bashrc
+
+  ubuntu-create-user:
+    name: Ubuntu create-user + verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Create user + install environment (as root)
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo bash ./create-user-ubuntu.sh ciuser
+
+      - name: Verify user, group, and passwordless sudo
+        shell: bash
+        run: |
+          # Report each check explicitly rather than dying silently on set -e.
+          set -uo pipefail
+          rc=0
+          id ciuser || rc=1
+          # Membership via substring on a captured string (a `grep -q` pipe would
+          # SIGPIPE its upstream and trip pipefail even on success).
+          groups_list=" $(id -nG ciuser 2>/dev/null) "
+          if [[ "$groups_list" != *" sudo "* ]]; then echo "::error::ciuser not in sudo group:$groups_list"; rc=1; fi
+          # Needs sudo: /etc/sudoers.d is mode 0750 root, unreadable to the runner user.
+          if ! sudo test -f /etc/sudoers.d/90-ciuser-nopasswd; then echo "::error::sudoers drop-in missing"; rc=1; fi
+          if ! sudo visudo -cf /etc/sudoers.d/90-ciuser-nopasswd; then echo "::error::visudo check failed"; rc=1; fi
+          # The whole point: sudo without a password prompt.
+          if ! sudo -n -u ciuser sudo -n true; then echo "::error::passwordless sudo not working"; rc=1; fi
+          if [[ $rc -eq 0 ]]; then echo "passwordless sudo OK for ciuser"; fi
+          exit $rc
+
+      - name: Verify claude / codex installed in the new user's home
+        shell: bash
+        run: |
+          set -uo pipefail
+          # Tools land in ciuser's ~/.local/bin; check as that user. Use plain
+          # `sudo -u` (not -i): sudo -i flattens the multi-line command into one
+          # line, which breaks the for-loop.
+          sudo -u ciuser -H bash -c '
+            export PATH="$HOME/.local/bin:$PATH"
+            rc=0
+            for t in node claude codex; do
+              if command -v "$t" >/dev/null; then echo "OK: $t"; else echo "::error::missing for ciuser: $t"; rc=1; fi
+            done
+            exit $rc
+          '
 
   windows-install:
     name: Windows install + verify
