@@ -72,7 +72,7 @@ The native-first ordering is not arbitrary: `claude.ai/install.*` sits behind a 
 
 This matters because Claude Code refuses `--dangerously-skip-permissions` under root: the tooling is installed for a normal user on purpose. Debian ships `fd`/`bat` as `fdfind`/`batcat`; the script creates user-level `fd`/`bat` shims in `~/.local/bin`.
 
-`create-user-ubuntu.sh` is the root-only entry point for exactly this case: it creates a passwordless-sudo user, then runs `install-ubuntu.sh` *as that user* (via `runuser`/`sudo -u`, unsetting `SUDO_USER` so `TARGET_USER` resolves to the new user). It is intentionally flagless — one optional positional username (default `dev`) — and hardcodes `--no-ssh` on the chained install so a remote root session can't accidentally lock itself out by flipping sshd to 58888/key-only.
+`install-ubuntu.sh` handles the root case itself via `maybe_bootstrap_user`: when run as root with no non-root `SUDO_USER`, instead of installing for root it creates an unprivileged user (`CLI_USER`, default `dev`) with passwordless sudo, then re-runs *itself* as that user (feeding the script over stdin via `runuser`/`sudo -u`, since a clone in `/root` is unreadable to the new user) and exits. That re-run forces `--no-ssh` so a remote root session can't lock itself out by flipping sshd to 58888/key-only. Running as a normal sudo user skips the bootstrap entirely.
 
 ## Shell profiles
 

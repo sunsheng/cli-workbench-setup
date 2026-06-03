@@ -63,44 +63,12 @@ OpenSSH Server 步骤需要管理员权限；普通会话会自动跳过 SSH 配
 
 ### Ubuntu Server
 
-`claude --dangerously-skip-permissions` **拒绝以 root/sudo 身份运行**。而很多云主机默认就是 root 登录，直接拿 `install-ubuntu.sh` 装会把环境装到 root 名下，`claude` 照样跑不起来。因此分两种情况：
+`claude --dangerously-skip-permissions` **拒绝以 root/sudo 身份运行**。`install-ubuntu.sh` 据此自适应：
 
-#### 情况一：你现在是 root（推荐，云主机默认）
+- **以 root 运行**（很多云主机默认）：它**自动创建一个带免密 sudo 的普通用户**（默认 `dev`），再以该用户身份把整套环境（CLI 工具 + `claude` / `codex` + bash/vim 配置）装到其名下。
+- **以普通 sudo 用户运行**：直接装到当前用户名下。
 
-用 `create-user-ubuntu.sh` 一键**创建一个带免密 sudo 的普通用户，并把整套环境（CLI 工具 + `claude` / `codex` + bash/vim 配置）装到该用户名下**。脚本没有任何开关，唯一可选参数是用户名（默认 `dev`）：
-
-```bash
-# 以 root 运行
-curl -fsSL https://raw.githubusercontent.com/sunsheng/windows-cli-setup/main/create-user-ubuntu.sh | bash          # 创建用户 dev
-curl -fsSL https://raw.githubusercontent.com/sunsheng/windows-cli-setup/main/create-user-ubuntu.sh | bash -s myname  # 或指定用户名
-```
-
-或克隆仓库后本地执行：
-
-```bash
-git clone https://github.com/sunsheng/windows-cli-setup.git
-cd windows-cli-setup
-bash ./create-user-ubuntu.sh          # 创建用户 dev
-bash ./create-user-ubuntu.sh myname   # 或指定用户名
-```
-
-随后切到该用户即可正常使用：
-
-```bash
-sudo -iu dev
-claude --dangerously-skip-permissions
-```
-
-`create-user-ubuntu.sh` 的行为：
-
-1. 用 `adduser --disabled-password` 创建用户（不存在才创建），加入 `sudo` 组。
-2. 写入 `/etc/sudoers.d/90-<user>-nopasswd`（`NOPASSWD:ALL`，`0440`），写前用 `visudo -cf` 校验，写后再 `visudo -c` 全量校验，避免写坏锁死 sudo。
-3. 以新用户身份运行 `install-ubuntu.sh` 安装环境。**内部固定带 `--no-ssh`**：脚本通常跑在远程 root 会话里，自动把 sshd 切到 58888、禁用密码登录有把自己锁在门外的风险，所以默认不动 SSH。需要 SSH 加固时，切到该用户后单独跑一次 `install-ubuntu.sh` 即可。
-4. 新用户默认禁用密码登录（`--disabled-password`）；如需密码登录，自行 `sudo passwd <user>`。
-
-#### 情况二：你已经是带 sudo 的普通用户
-
-直接给当前用户安装环境：
+所以一条命令即可，不用区分身份：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/sunsheng/windows-cli-setup/main/install-ubuntu.sh | bash
@@ -114,15 +82,30 @@ cd windows-cli-setup
 bash ./install-ubuntu.sh
 ```
 
-常用开关：
+root 自动建用户后，切过去即可使用：
 
 ```bash
-bash ./install-ubuntu.sh --no-profile   # 只装工具，不安装 bash/vim 配置
-bash ./install-ubuntu.sh --no-ssh       # 不安装/配置 OpenSSH Server
-NODE_MAJOR=22 bash ./install-ubuntu.sh  # 如需固定到 Node.js 22.x
+sudo -iu dev
+claude --dangerously-skip-permissions
 ```
 
-Ubuntu 脚本会使用 `sudo` 安装系统包，并把 `claude` / `codex` 等用户级工具装到**当前用户**（`$SUDO_USER`，即你而非 root）名下。默认 Node.js 目标为 24.x LTS；如果系统已有 `node` + `npm` + `npx` 且主版本不低于 24，会直接复用。
+常用开关与环境变量：
+
+```bash
+bash ./install-ubuntu.sh --no-profile    # 只装工具，不安装 bash/vim 配置
+bash ./install-ubuntu.sh --no-ssh        # 不安装/配置 OpenSSH Server
+CLI_USER=alice bash ./install-ubuntu.sh  # 以 root 运行时，指定自动创建的用户名（默认 dev）
+NODE_MAJOR=22 bash ./install-ubuntu.sh   # 如需固定到 Node.js 22.x
+```
+
+关于 root 自动建用户的几点：
+
+1. 用 `adduser --disabled-password` 创建用户（不存在才创建，默认禁用密码登录），加入 `sudo` 组。
+2. 写入 `/etc/sudoers.d/90-<user>-nopasswd`（`NOPASSWD:ALL`，`0440`），落盘前后都用 `visudo` 校验，避免写坏锁死 sudo。
+3. 以新用户身份重跑安装器，**此路径强制 `--no-ssh`**：脚本通常跑在远程 root 会话里，自动把 sshd 切到 58888、禁用密码登录有把自己锁在门外的风险。需要 SSH 加固时，切到该用户后**单独再跑一次** `bash ./install-ubuntu.sh`（以普通用户身份运行就会配置 SSH）。
+4. 如需给新用户设密码，自行 `sudo passwd <user>`。
+
+Ubuntu 脚本会使用 `sudo` 安装系统包。默认 Node.js 目标为 24.x LTS；如果系统已有 `node` + `npm` + `npx` 且主版本不低于 24，会直接复用。
 
 ## 脚本行为
 
@@ -265,8 +248,7 @@ sudo systemctl restart ssh
 ```text
 windows-cli-setup/
 ├── install.ps1                              # Windows 一键安装脚本
-├── install-ubuntu.sh                        # Ubuntu Server 一键安装脚本
-├── create-user-ubuntu.sh                    # Ubuntu 创建免密 sudo 用户并为其安装环境
+├── install-ubuntu.sh                        # Ubuntu Server 一键安装脚本（root 下自动建用户）
 ├── config/
 │   ├── Microsoft.PowerShell_profile.ps1     # PowerShell 配置
 │   ├── _vimrc                               # Windows Vim 配置
@@ -351,8 +333,8 @@ ls ~/Library/Fonts | grep -i nerd
 仓库带有 GitHub Actions 工作流 `.github/workflows/ci.yml`：
 
 1. Windows lint：解析 `install.ps1` 与 PowerShell profile，并运行 PSScriptAnalyzer。
-2. Ubuntu lint：`bash -n` 检查 `install-ubuntu.sh`、`create-user-ubuntu.sh` 与配置，并运行 ShellCheck。
-2.5. Ubuntu create-user：以 root 执行 `create-user-ubuntu.sh`，校验用户、`sudo` 组、免密 sudo（`sudo -n`），以及 `claude` / `codex` 已装到新用户名下。
+2. Ubuntu lint：`bash -n` 检查 `install-ubuntu.sh` 与配置，并运行 ShellCheck。
+2.5. Ubuntu root bootstrap：以 root 执行 `install-ubuntu.sh`，校验自动创建的用户、`sudo` 组、免密 sudo（`sudo -n`），以及 `claude` / `codex` 已装到新用户名下。
 3. Windows install：在 `windows-latest` 上执行 `.\install.ps1 -NoSsh`，验证 CLI、Node.js、Codex CLI、Claude Code CLI、profile 和 git 快捷方式。
 4. Ubuntu install：在 `ubuntu-latest` 上执行 `bash ./install-ubuntu.sh --no-ssh`，验证 CLI、Node.js、Codex CLI、Claude Code CLI、bash 配置、fzf Ctrl+R/Ctrl+T 绑定和 git 快捷方式。
 
