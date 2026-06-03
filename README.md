@@ -18,15 +18,16 @@
 | [jq](https://jqlang.github.io/jq/) | `jq` | JSON 处理 |
 | [7-Zip](https://www.7-zip.org) | `7z` | 压缩/解压 |
 | [eza](https://github.com/eza-community/eza) | `eza` | 现代 `ls` / `tree` |
-| [lsd](https://github.com/lsd-rs/lsd) | `lsd` | 另一个现代 `ls` |
 | [vim](https://www.vim.org) | `vim` | 文本编辑器 |
 | [zoxide](https://github.com/ajeetdsouza/zoxide) | `z` | 智能 `cd` |
 | [PSFzf](https://github.com/kelleyma49/PSFzf) | — | fzf 与 PSReadLine 集成（Ctrl+R / Ctrl+T） |
-| [FiraCode Nerd Font](https://www.nerdfonts.com/) | — | 带图标/连字的等宽字体（供 `eza --icons` 等使用） |
+| [PowerShell 7](https://github.com/PowerShell/PowerShell) | `pwsh` | **需预先安装**；脚本只把它设为 SSH 默认 shell，不负责安装 |
+
+> 字体（Nerd Font）不在服务器上安装——图标由**客户端终端**渲染。客户端安装方法见下方[「备注」](#备注)。
 
 ## 快速安装
 
-在一个普通（或管理员）PowerShell 窗口运行：
+在一个普通（非管理员）PowerShell 窗口运行（Scoop 官方推荐非管理员；若在管理员会话下脚本会自动加 `-RunAsAdmin`）：
 
 ```powershell
 iwr -useb https://raw.githubusercontent.com/sunsheng/windows-cli-setup/main/install.ps1 | iex
@@ -43,15 +44,22 @@ cd windows-cli-setup
 脚本会：
 
 1. 安装 Scoop（若未安装；在管理员会话下自动加 `-RunAsAdmin`）
-2. 添加 `extras` 和 `nerd-fonts` bucket
-3. 安装 FiraCode Nerd Font 字体
-4. 安装上表中的所有工具
+2. 安装 git（Scoop 添加 bucket 需要它，故先装）
+3. 添加 `extras` bucket
+4. 安装上表中的所有 CLI 工具
 5. 安装 `PSFzf` 模块
 6. 把 `config/Microsoft.PowerShell_profile.ps1` 复制到你的 `$PROFILE`（已有的会自动备份为 `*.bak-<时间戳>`）
+7. 把 `config/_vimrc` 复制到 `$HOME\_vimrc` 并创建撤销目录 `vimfiles\undo`（已有的会自动备份）
+8. 配置常用 git 别名（`st` / `df` / `dc` / `lg` / `last`）
+9. **（需管理员）** 安装并配置 OpenSSH Server：启用 `sshd` 服务、监听 `22` + `58888` 端口、限制登录组为 `administrators` / `openssh users`、放行对应防火墙、把 SSH 默认 shell 设为 `pwsh`；非管理员或加 `-NoSsh` 时跳过此步
 
 > 脚本可重复运行——每一步都会先检查是否已安装。
 >
-> 只想装工具、不动 profile？加 `-NoProfile`：`.\install.ps1 -NoProfile`
+> 只想装工具、不动个人配置（profile / `_vimrc` / git 别名）？加 `-NoProfile`：`.\install.ps1 -NoProfile`
+>
+> 不想配置 OpenSSH Server？加 `-NoSsh` 跳过那一步：`.\install.ps1 -NoSsh`（两个开关可同时用）。
+>
+> OpenSSH Server 那一步需要管理员权限——想启用就用**管理员** PowerShell 运行脚本；普通会话会自动跳过它（其余步骤照常）。
 
 安装完成后**新开一个 PowerShell 窗口**（或运行 `. $PROFILE`）即可生效。
 
@@ -67,7 +75,7 @@ lt                 # 树形，限 2 层（替代 tree）
 tree               # 完整树形
 ```
 
-> 以上函数已默认带 `--icons`，图标需终端使用 Nerd Font 字体才能正常显示——脚本已自动安装 FiraCode Nerd Font，把终端字体设为 **FiraCode Nerd Font** 即可。
+> 以上函数已默认带 `--icons`，图标需**客户端终端**使用 Nerd Font 字体才能正常显示（脚本不在服务器装字体）。客户端安装方法见下方[「备注」](#备注)。
 
 ### 查看文件（bat）
 
@@ -105,6 +113,7 @@ zi           # 交互式选择历史目录（配合 fzf）
 |--------|------|
 | **Ctrl+R** | 模糊搜索命令历史，回车填入命令行 |
 | **Ctrl+T** | 模糊查找当前目录文件，选中后插入命令行 |
+| **Ctrl+D** | 命令行为空时退出当前 shell（bash 风格 EOF；非空时不触发） |
 
 ### JSON / 压缩
 
@@ -114,13 +123,43 @@ something | jq '.key'        # 提取 JSON 字段
 7z a archive.7z folder\      # 压缩
 ```
 
+### Git 别名
+
+脚本通过 `git config --global` 写入以下别名（只动 `alias.*`，不会覆盖你的姓名/邮箱等配置）：
+
+| 别名 | 等价命令 | 说明 |
+|------|----------|------|
+| `git st` | `status -sb` | 精简状态 + 分支行 |
+| `git df` | `diff` | 查看**未暂存**改动 |
+| `git dc` | `diff --cached` | 查看**已暂存**改动 |
+| `git lg` | `log --graph --oneline --decorate --all` | 所有分支的紧凑提交图 |
+| `git last` | `log -1 HEAD --stat` | 最近一次提交及改动文件 |
+
+### SSH 远程登录（OpenSSH Server）
+
+用**管理员** PowerShell 运行脚本时会自动：启用 `sshd` 服务并设为开机自启、让 sshd 监听 **22 和 58888** 两个端口、把登录限制在 `administrators` 与 `openssh users` 组、放行两个端口的防火墙、把 SSH 默认 shell 设为 `pwsh`（这样 `ssh <主机>` 进来直接落在 PowerShell 7）。加 `-NoSsh` 可跳过整步。
+
+```powershell
+ssh <用户名>@<主机>              # 默认 22 端口，进来即是 pwsh
+ssh -p 58888 <用户名>@<主机>     # 走 58888 端口
+Get-Service sshd                # 在服务器上查看 sshd 状态
+```
+
+> **默认 shell**：写在机器级注册表 `HKLM:\SOFTWARE\OpenSSH\DefaultShell`，并设 `DefaultShellCommandOption = -c`。脚本按 `Program Files → WindowsApps 执行别名 → PATH` 顺序解析 `pwsh`，优先选稳定（不带版本号）的路径——以**运行脚本的那个用户**身份登录 SSH 时有效。
+>
+> **端口/分组**写入 `C:\ProgramData\ssh\sshd_config`（幂等地插在结尾 `Match` 块之前），改动后会自动 `Restart-Service sshd`。
+>
+> 图标字形由你敲字的那台**客户端终端**渲染，记得在客户端装并启用 Nerd Font（见下方"备注"）。
+
 ## 仓库结构
 
 ```
 windows-cli-setup/
 ├── install.ps1                              # 一键安装脚本
 ├── config/
-│   └── Microsoft.PowerShell_profile.ps1     # PowerShell 配置（别名/快捷键/zoxide）
+│   ├── Microsoft.PowerShell_profile.ps1     # PowerShell 配置（别名/快捷键/zoxide）
+│   └── _vimrc                               # vim 基础配置（无插件）
+├── .github/workflows/ci.yml                 # CI：lint + 在 Windows runner 上跑安装并验证
 └── README.md
 ```
 
@@ -136,12 +175,23 @@ scoop uninstall <name>  # 卸载
 
 ## 备注
 
-- 图标已默认开启（profile 中各 eza 函数带 `--icons`）。脚本会安装 [FiraCode Nerd Font](https://www.nerdfonts.com/)，但**需手动把终端字体设为 “FiraCode Nerd Font”** 图标才会正常显示（否则会看到方框/乱码）。
-  - Windows Terminal：`设置 → 配置文件 → 外观 → 字体`
-  - VS Code 集成终端：`"terminal.integrated.fontFamily": "FiraCode Nerd Font"`
-  - 想换字体？`scoop search nerd-fonts/` 查可装项，如 `scoop install nerd-fonts/JetBrainsMono-NF`。
-- **SSH 远程使用**：图标字形由你正在敲字的那个**客户端终端**渲染，与服务器无关。从别的机器 ssh 进来时，要在**那台客户端**装并选用 Nerd Font，服务器装字体没用。profile 已强制 UTF-8 输出（`[Console]::OutputEncoding`），避免 SSH 会话以非 UTF-8 codepage 启动时把图标错码成 `?`。
+- **图标 / Nerd Font（装在客户端，不装在服务器）**：图标已默认开启（profile 中各 eza 函数带 `--icons`），但字形由你**正在敲字的那台客户端终端**渲染，与服务器无关——所以脚本**不**在服务器装字体。要让图标正常显示（否则会看到方框/乱码），在**客户端**装一个 Nerd Font 并选用：
+  - 装字体（客户端机器上任选其一）：
+    - 客户端也用 Scoop：`scoop bucket add nerd-fonts; scoop install nerd-fonts/FiraCode-NF`
+    - 或 winget：`winget install --id DEVCOM.JetBrainsMonoNerdFont`（或到 [nerdfonts.com](https://www.nerdfonts.com/) 直接下载安装）
+  - 选用字体：
+    - Windows Terminal：`设置 → 配置文件 → 外观 → 字体` 选 “FiraCode Nerd Font”
+    - VS Code 集成终端：`"terminal.integrated.fontFamily": "FiraCode Nerd Font"`
+  - profile 已强制 UTF-8 输出（`[Console]::OutputEncoding`），避免 SSH 会话以非 UTF-8 codepage 启动时把图标错码成 `?`。
 - profile 使用 `function` 而非 `Set-Alias`，以便携带默认参数（如 `--icons`、`--git`、`--tree --level=2`）。
+- `pwsh`（PowerShell 7）**需预先安装**——脚本只把它设为 SSH 默认 shell，不负责安装。可用 `winget install Microsoft.PowerShell` 装。
+
+## 持续集成（CI）
+
+仓库带了一个 GitHub Actions 工作流 [`​.github/workflows/ci.yml`](.github/workflows/ci.yml)，在 `push` / `pull_request` / 手动触发时于 **Windows runner** 上：
+
+1. **lint**：解析 `install.ps1` 与 profile、跑 PSScriptAnalyzer（Error 级）；
+2. **install**：执行 `.\install.ps1 -NoSsh`，然后校验所有 CLI 工具在 PATH 上、git 别名已写入、profile 能干净加载。
 
 ## License
 
