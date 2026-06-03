@@ -81,17 +81,20 @@ jobs:
       - name: Verify user, group, and passwordless sudo
         shell: bash
         run: |
-          set -euo pipefail
-          id ciuser
-          # Membership check without a pipe: `grep -q` would SIGPIPE its upstream
-          # and trip pipefail even on success.
-          groups_list=" $(id -nG ciuser) "
-          [[ "$groups_list" == *" sudo "* ]] || { echo "::error::ciuser not in sudo group"; exit 1; }
-          test -f /etc/sudoers.d/90-ciuser-nopasswd
-          sudo visudo -cf /etc/sudoers.d/90-ciuser-nopasswd
+          # Report each check explicitly rather than dying silently on set -e.
+          set -uo pipefail
+          rc=0
+          id ciuser || rc=1
+          # Membership via substring on a captured string (a `grep -q` pipe would
+          # SIGPIPE its upstream and trip pipefail even on success).
+          groups_list=" $(id -nG ciuser 2>/dev/null) "
+          if [[ "$groups_list" != *" sudo "* ]]; then echo "::error::ciuser not in sudo group:$groups_list"; rc=1; fi
+          if [[ ! -f /etc/sudoers.d/90-ciuser-nopasswd ]]; then echo "::error::sudoers drop-in missing"; rc=1; fi
+          if ! sudo visudo -cf /etc/sudoers.d/90-ciuser-nopasswd; then echo "::error::visudo check failed"; rc=1; fi
           # The whole point: sudo without a password prompt.
-          sudo -n -u ciuser sudo -n true
-          echo "passwordless sudo OK for ciuser"
+          if ! sudo -n -u ciuser sudo -n true; then echo "::error::passwordless sudo not working"; rc=1; fi
+          if [[ $rc -eq 0 ]]; then echo "passwordless sudo OK for ciuser"; fi
+          exit $rc
 
       - name: Verify claude / codex installed in the new user's home
         shell: bash
