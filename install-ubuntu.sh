@@ -310,6 +310,51 @@ install_codex_cli() {
     command_exists codex || die "codex was not found after installation."
 }
 
+# Download the Claude Code native binary straight from downloads.claude.ai and run
+# its built-in installer. The entry script at claude.ai/install.sh sits behind
+# Cloudflare's managed challenge, which 403s bare curl from datacenter IPs (cloud
+# VMs); the downloads host has no such challenge. Returns non-zero on any failure
+# so the caller can fall back to the official installer or npm.
+download_claude_native() {
+    # shellcheck disable=SC2016
+    run_target_user sh -lc '
+        set -e
+        base="https://downloads.claude.ai/claude-code-releases"
+        ver="$(curl -fsSL "$base/latest")"
+        case "$ver" in
+            [0-9]*.[0-9]*.[0-9]*) : ;;
+            *) echo "Unexpected version from downloads.claude.ai: $ver" >&2; exit 1 ;;
+        esac
+        case "$(uname -m)" in
+            x86_64|amd64) arch="x64" ;;
+            aarch64|arm64) arch="arm64" ;;
+            *) echo "Unsupported architecture: $(uname -m)" >&2; exit 1 ;;
+        esac
+        if [ -f /lib/libc.musl-x86_64.so.1 ] || [ -f /lib/libc.musl-aarch64.so.1 ]; then
+            platform="linux-${arch}-musl"
+        else
+            platform="linux-${arch}"
+        fi
+        manifest="$(curl -fsSL "$base/$ver/manifest.json")"
+        expected="$(printf "%s" "$manifest" | jq -r ".platforms[\"$platform\"].checksum // empty")"
+        binary="$(printf "%s" "$manifest" | jq -r ".platforms[\"$platform\"].binary // \"claude\"")"
+        if [ -z "$expected" ]; then
+            echo "Platform $platform not found in manifest" >&2
+            exit 1
+        fi
+        tmp="$(mktemp)"
+        trap "rm -f \"$tmp\"" EXIT
+        curl -fsSL -o "$tmp" "$base/$ver/$platform/$binary"
+        actual="$(sha256sum "$tmp" | cut -d" " -f1)"
+        if [ "$expected" != "$actual" ]; then
+            echo "Checksum verification failed for $platform" >&2
+            exit 1
+        fi
+        chmod +x "$tmp"
+        "$tmp" install
+    '
+}
+
 install_claude_code_cli() {
     step "Ensuring Claude Code CLI..."
     export PATH="$USER_BIN:$PATH"
@@ -318,18 +363,23 @@ install_claude_code_cli() {
         return
     fi
 
+    # Preferred: native binary direct from downloads.claude.ai (works from datacenter
+    # IPs). Fallback 1: claude.ai/install.sh (works from residential IPs / via proxy).
+    # Fallback 2: npm.
     # shellcheck disable=SC2016
-    if run_target_user sh -lc 'set -e; tmp="$(mktemp)"; trap "rm -f \"$tmp\"" EXIT; curl -fsSL https://claude.ai/install.sh -o "$tmp"; bash "$tmp"'; then
+    if download_claude_native; then
+        :
+    elif run_target_user sh -lc 'set -e; tmp="$(mktemp)"; trap "rm -f \"$tmp\"" EXIT; curl -fsSL https://claude.ai/install.sh -o "$tmp"; bash "$tmp"'; then
         :
     else
-        warn "Claude Code official installer failed; falling back to npm."
+        warn "Claude Code native and official installers failed; falling back to npm."
         ensure_npm_user_prefix
         run_target_user npm install -g @anthropic-ai/claude-code
     fi
 
     export PATH="$USER_BIN:$PATH"
     if ! command_exists claude; then
-        warn "claude command still not found after official installer; falling back to npm."
+        warn "claude command still not found after installers; falling back to npm."
         ensure_npm_user_prefix
         run_target_user npm install -g @anthropic-ai/claude-code
     fi

@@ -184,6 +184,51 @@ function Install-CodexCli {
     }
 }
 
+# Download the Claude Code native binary directly from downloads.claude.ai and run
+# its built-in installer. The entry script at claude.ai/install.ps1 sits behind
+# Cloudflare's managed challenge, which can 403 bare requests from datacenter IPs
+# (cloud VMs); the downloads host has no such challenge. Returns $true on success,
+# $false on any failure so the caller can fall back to the official installer or npm.
+function Install-ClaudeNative {
+    $base = 'https://downloads.claude.ai/claude-code-releases'
+    $tmp = $null
+    $oldProgress = $ProgressPreference
+    try {
+        $ProgressPreference = 'SilentlyContinue'
+        $arch = switch ($env:PROCESSOR_ARCHITECTURE) {
+            'AMD64' { 'x64' }
+            'ARM64' { 'arm64' }
+            default { throw "Unsupported architecture: $env:PROCESSOR_ARCHITECTURE" }
+        }
+        $platform = "win32-$arch"
+        $ver = (Invoke-RestMethod -Uri "$base/latest").ToString().Trim()
+        if ($ver -notmatch '^\d+\.\d+\.\d+') { throw "Unexpected version from downloads.claude.ai: $ver" }
+
+        $node = (Invoke-RestMethod -Uri "$base/$ver/manifest.json").platforms.$platform
+        if (-not $node -or [string]::IsNullOrWhiteSpace($node.checksum)) {
+            throw "Platform $platform not found in manifest"
+        }
+        $binary = if ($node.binary) { $node.binary } else { 'claude.exe' }
+
+        $tmp = Join-Path $env:TEMP "claude-$ver-$platform.exe"
+        Invoke-WebRequest -Uri "$base/$ver/$platform/$binary" -OutFile $tmp
+        $actual = (Get-FileHash $tmp -Algorithm SHA256).Hash.ToLower()
+        if ($actual -ne $node.checksum.ToLower()) {
+            throw "Checksum verification failed for $platform"
+        }
+        # Route the installer's console output to the host so it does not leak into
+        # this function's return value.
+        & $tmp install | Out-Host
+        return $true
+    } catch {
+        Write-Warning "Claude Code native install failed: $($_.Exception.Message)"
+        return $false
+    } finally {
+        $ProgressPreference = $oldProgress
+        if ($tmp -and (Test-Path $tmp)) { Remove-Item $tmp -Force -ErrorAction SilentlyContinue }
+    }
+}
+
 function Install-ClaudeCodeCli {
     Write-Step "Ensuring Claude Code CLI..."
     Update-AiCliPath
@@ -192,17 +237,21 @@ function Install-ClaudeCodeCli {
         return
     }
 
-    try {
-        $installer = Invoke-RestMethod -Uri 'https://claude.ai/install.ps1'
-        & ([scriptblock]::Create($installer))
-    } catch {
-        Write-Warning "Claude Code official installer failed; falling back to npm: $($_.Exception.Message)"
-        npm install -g @anthropic-ai/claude-code
+    # Preferred: native binary direct from downloads.claude.ai (works from datacenter
+    # IPs). Fallback 1: claude.ai/install.ps1. Fallback 2: npm.
+    if (-not (Install-ClaudeNative)) {
+        try {
+            $installer = Invoke-RestMethod -Uri 'https://claude.ai/install.ps1'
+            & ([scriptblock]::Create($installer))
+        } catch {
+            Write-Warning "Claude Code official installer failed; falling back to npm: $($_.Exception.Message)"
+            npm install -g @anthropic-ai/claude-code
+        }
     }
 
     Update-AiCliPath
     if (-not (Get-Command claude -ErrorAction SilentlyContinue)) {
-        Write-Step "Claude command still not found after official installer; falling back to npm..."
+        Write-Step "Claude command still not found after installers; falling back to npm..."
         npm install -g @anthropic-ai/claude-code
         Update-AiCliPath
     }
