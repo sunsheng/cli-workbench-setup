@@ -28,8 +28,60 @@ if (Test-Path Alias:cat) { Remove-Item Alias:cat -Force }
 function cat { bat @args }
 
 # --- zoxide: smarter cd (use `z <dir>` to jump, `zi` for interactive) ---
-Invoke-Expression (& { (zoxide init powershell | Out-String) })
+# `zoxide init` forks the exe and prints the same script on every startup
+# (~130ms). Cache its output and dot-source the cache instead; regenerate only
+# when the cache is missing. After upgrading zoxide, delete the cache to refresh.
+# Guarded so the profile doesn't error where zoxide isn't installed (e.g. after
+# `install.ps1 -NoProfile`, or on a machine without the tools).
+$zoxideCache = Join-Path (Split-Path $PROFILE) '.zoxide-init.ps1'
+if (-not (Test-Path $zoxideCache)) {
+    if (Get-Command zoxide -ErrorAction SilentlyContinue) {
+        zoxide init powershell | Out-File -FilePath $zoxideCache -Encoding utf8
+    }
+}
+if (Test-Path $zoxideCache) { . $zoxideCache }
 
 # --- PSFzf: fuzzy history (Ctrl+R) and file search (Ctrl+T) ---
-Import-Module PSFzf
-Set-PsFzfOption -PSReadlineChordProvider 'Ctrl+t' -PSReadlineChordReverseHistory 'Ctrl+r'
+# Importing PSFzf at startup costs ~400ms, but most sessions never use fzf.
+# Defer it: the Ctrl+R/Ctrl+T stubs below import PSFzf on first use, then hand
+# off to its real handler. Set-PsFzfOption rebinds both chords to PSFzf's own
+# handlers, so each stub runs at most once per session. The availability probe
+# also moves here, off the startup path. Bound inside the PSReadLine guard.
+$script:psfzfLoaded = $false
+function Initialize-PSFzf {
+    if ($script:psfzfLoaded) { return }
+    $script:psfzfLoaded = $true
+    if (-not (Get-Module PSFzf -ListAvailable)) { return }
+    Import-Module PSFzf
+    Set-PsFzfOption -PSReadlineChordProvider 'Ctrl+t' -PSReadlineChordReverseHistory 'Ctrl+r'
+}
+
+if (Get-Module PSReadLine -ListAvailable) {
+    Set-PSReadLineKeyHandler -Chord 'Ctrl+r' -ScriptBlock {
+        Initialize-PSFzf
+        Invoke-FzfPsReadlineHandlerHistory
+    }
+    Set-PSReadLineKeyHandler -Chord 'Ctrl+t' -ScriptBlock {
+        Initialize-PSFzf
+        Invoke-FzfPsReadlineHandlerProvider
+    }
+
+    # --- Ctrl+D: bash-style EOF — delete char under cursor, or exit on empty line ---
+    # Use PSReadLine's built-in DeleteCharOrExit. Calling `exit` from a custom
+    # scriptblock handler runs in a child scope and does NOT reliably close the
+    # host, so the previous scriptblock version did nothing on an empty line.
+    Set-PSReadLineKeyHandler -Chord 'Ctrl+d' -Function DeleteCharOrExit
+}
+
+# ===== Git aliases (oh-my-zsh `git` plugin style — read-only / inspection) =====
+# Shell-level shortcuts for *looking* at a repo (status / diff / log / show),
+# using oh-my-zsh's git plugin names. NOT `git config` subcommand aliases, so
+# they work in every shell without touching ~/.gitconfig. Defined as functions
+# so extra arguments flow through via @args (e.g. `gd HEAD~1`, `gsh <sha>`).
+function gst   { git status @args }                                 # status
+function gss   { git status -s @args }                              # short status
+function gd    { git diff @args }                                   # unstaged changes
+function gdca  { git diff --cached @args }                          # staged changes
+function glog  { git log --oneline --decorate --graph @args }       # compact log + graph
+function glola { git log --graph --oneline --decorate --all @args } # graph of all branches
+function gsh   { git show @args }                                   # show a commit

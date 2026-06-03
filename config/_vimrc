@@ -1,0 +1,44 @@
+" ===== 基础 =====
+set nocompatible
+syntax on
+filetype plugin indent on
+set encoding=utf-8
+set fileencodings=ucs-bom,utf-8,gbk,gb18030,latin1   " 正确打开中文/GBK 文件
+
+" ===== 界面 =====
+set number              " 行号
+set ruler               " 右下角光标位置
+set showcmd             " 显示正在输入的命令
+set cursorline          " 高亮当前行
+set wildmenu            " 命令行补全菜单
+set laststatus=2        " 总是显示状态栏
+set scrolloff=3         " 上下保留 3 行视野
+if has('termguicolors') | set termguicolors | endif
+silent! colorscheme habamax     " 内置深色主题(vim 9 自带)
+
+" ===== 搜索 =====
+set incsearch           " 边输边搜
+set hlsearch            " 高亮匹配
+set ignorecase          " 忽略大小写
+set smartcase           " 但含大写时区分
+
+" ===== 缩进 =====
+set expandtab           " Tab 转空格
+set tabstop=4
+set shiftwidth=4
+set softtabstop=4
+set autoindent
+set smartindent
+
+" ===== 编辑体验 =====
+set backspace=indent,eol,start
+set mouse=a             " 鼠标可用
+set clipboard=unnamed   " y/p 直接走系统剪贴板
+set hidden              " 允许有未保存的缓冲区切换
+set wrap
+
+" ===== 文件/撤销 =====
+set noswapfile          " 不生成 .swp
+set nobackup
+set undofile            " 持久化撤销(关了文件重开还能 undo)
+set undodir=$HOME/vimfiles/undo
