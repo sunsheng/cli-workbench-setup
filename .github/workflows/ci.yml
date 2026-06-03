@@ -100,15 +100,17 @@ jobs:
       - name: Verify claude / codex installed in the new user's home
         shell: bash
         run: |
-          set -euo pipefail
-          # Tools land in ciuser's ~/.local/bin; check as that user via a login shell.
-          sudo -iu ciuser bash -lc '
-            set -e
+          set -uo pipefail
+          # Tools land in ciuser's ~/.local/bin; check as that user. Use plain
+          # `sudo -u` (not -i): sudo -i flattens the multi-line command into one
+          # line, which breaks the for-loop.
+          sudo -u ciuser -H bash -c '
             export PATH="$HOME/.local/bin:$PATH"
+            rc=0
             for t in node claude codex; do
-              command -v "$t" >/dev/null || { echo "::error::missing for ciuser: $t"; exit 1; }
-              echo "OK: $t"
+              if command -v "$t" >/dev/null; then echo "OK: $t"; else echo "::error::missing for ciuser: $t"; rc=1; fi
             done
+            exit $rc
           '
 
   windows-install:
