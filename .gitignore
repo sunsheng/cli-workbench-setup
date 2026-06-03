@@ -1,0 +1,8 @@
+# PowerShell profile backups created by install.ps1
+*.bak-*
+
+# OS / editor cruft
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
