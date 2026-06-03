@@ -13,8 +13,8 @@ if ($env:Path -notlike "*$env:USERPROFILE\scoop\shims*") {
 
 # --- eza: modern replacement for ls / tree ---
 # Remove the built-in `ls` alias (Get-ChildItem) so we can repoint it to eza.
-# Icons require a Nerd Font (installed by install.ps1); set the terminal font
-# to "FiraCode Nerd Font" for them to render correctly.
+# Icons require a Nerd Font on the client terminal; the installer does not put
+# fonts on the server.
 if (Test-Path Alias:ls) { Remove-Item Alias:ls -Force }
 function ls  { eza --icons --group-directories-first @args }                 # plain listing
 function ll  { eza --icons -la --group-directories-first --git @args }       # long, with hidden + git status

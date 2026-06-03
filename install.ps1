@@ -4,7 +4,8 @@
     One-shot setup for a modern Windows command-line environment.
 
 .DESCRIPTION
-    Installs the Scoop package manager, a set of common CLI tools, and the
+    Installs the Scoop package manager, a set of common CLI tools, Node.js LTS,
+    and the
     PSFzf module, then installs the bundled PowerShell profile that wires up
     aliases (eza/bat) and keybindings (fzf Ctrl+R / Ctrl+T) and zoxide.
 
@@ -27,6 +28,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+$NodeMajor = 24
 
 function Write-Step($msg) { Write-Host "==> $msg" -ForegroundColor Cyan }
 function Write-Skip($msg) { Write-Host "    (skip) $msg" -ForegroundColor DarkGray }
@@ -83,6 +85,130 @@ function Add-SshdGlobalLines($path, [string[]]$lines) {
     # ASCII keeps the file BOM-free; a BOM on the first line breaks sshd parsing.
     Set-Content -Path $path -Value $new -Encoding ascii
     return $true
+}
+
+function Get-NodeMajor {
+    if (-not (Get-Command node -ErrorAction SilentlyContinue)) { return $null }
+    try {
+        $major = & node -p "process.versions.node.split('.')[0]" 2>$null
+        if ($major -match '^\d+$') { return [int]$major }
+    } catch {
+        return $null
+    }
+    return $null
+}
+
+function Add-PathEntry {
+    param(
+        [Parameter(Mandatory=$true)][string]$PathEntry,
+        [switch]$Persist
+    )
+
+    if ([string]::IsNullOrWhiteSpace($PathEntry)) { return }
+    if (-not (Test-Path $PathEntry)) { return }
+
+    $needle = $PathEntry.TrimEnd('\')
+    $sessionHasPath = @($env:Path.Split(';', [System.StringSplitOptions]::RemoveEmptyEntries) |
+        Where-Object { $_.TrimEnd('\') -ieq $needle }).Count -gt 0
+    if (-not $sessionHasPath) {
+        $env:Path = "$PathEntry;$env:Path"
+    }
+
+    if ($Persist) {
+        $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+        $userHasPath = -not [string]::IsNullOrWhiteSpace($userPath) -and
+            @($userPath.Split(';', [System.StringSplitOptions]::RemoveEmptyEntries) |
+                Where-Object { $_.TrimEnd('\') -ieq $needle }).Count -gt 0
+        if (-not $userHasPath) {
+            $newUserPath = if ([string]::IsNullOrWhiteSpace($userPath)) { $PathEntry } else { "$PathEntry;$userPath" }
+            [Environment]::SetEnvironmentVariable('Path', $newUserPath, 'User')
+        }
+    }
+}
+
+function Get-NpmGlobalBinDir {
+    if (-not (Get-Command npm -ErrorAction SilentlyContinue)) { return $null }
+    try {
+        $prefix = (& npm config get prefix 2>$null | Select-Object -First 1).Trim()
+        if ([string]::IsNullOrWhiteSpace($prefix)) { return $null }
+        if ($IsWindows -or $env:OS -eq 'Windows_NT') { return $prefix }
+        return (Join-Path $prefix 'bin')
+    } catch {
+        return $null
+    }
+}
+
+function Update-AiCliPath {
+    $paths = @(
+        (Join-Path $env:LOCALAPPDATA 'Programs\OpenAI\Codex\bin'),
+        (Join-Path $HOME '.local\bin'),
+        (Get-NpmGlobalBinDir)
+    )
+    foreach ($path in $paths) {
+        Add-PathEntry -PathEntry $path -Persist
+    }
+}
+
+function Install-CodexCli {
+    Write-Step "Ensuring Codex CLI..."
+    Update-AiCliPath
+    if (Get-Command codex -ErrorAction SilentlyContinue) {
+        Write-Skip "codex already installed."
+        return
+    }
+
+    $oldNonInteractive = $env:CODEX_NON_INTERACTIVE
+    try {
+        $env:CODEX_NON_INTERACTIVE = '1'
+        $installer = Invoke-RestMethod -Uri 'https://chatgpt.com/codex/install.ps1'
+        & ([scriptblock]::Create($installer))
+    } catch {
+        Write-Warning "Codex official installer failed; falling back to npm: $($_.Exception.Message)"
+        npm install -g @openai/codex
+    } finally {
+        if ($null -eq $oldNonInteractive) {
+            Remove-Item Env:\CODEX_NON_INTERACTIVE -ErrorAction SilentlyContinue
+        } else {
+            $env:CODEX_NON_INTERACTIVE = $oldNonInteractive
+        }
+    }
+
+    Update-AiCliPath
+    if (-not (Get-Command codex -ErrorAction SilentlyContinue)) {
+        Write-Step "Codex command still not found after official installer; falling back to npm..."
+        npm install -g @openai/codex
+        Update-AiCliPath
+    }
+    if (-not (Get-Command codex -ErrorAction SilentlyContinue)) {
+        throw "codex was not found after installation."
+    }
+}
+
+function Install-ClaudeCodeCli {
+    Write-Step "Ensuring Claude Code CLI..."
+    Update-AiCliPath
+    if (Get-Command claude -ErrorAction SilentlyContinue) {
+        Write-Skip "claude already installed."
+        return
+    }
+
+    try {
+        $installer = Invoke-RestMethod -Uri 'https://claude.ai/install.ps1'
+        & ([scriptblock]::Create($installer))
+    } catch {
+        Write-Warning "Claude Code official installer failed; falling back to npm: $($_.Exception.Message)"
+        npm install -g @anthropic-ai/claude-code
+    }
+
+    Update-AiCliPath
+    if (-not (Get-Command claude -ErrorAction SilentlyContinue)) {
+        Write-Step "Claude command still not found after official installer; falling back to npm..."
+        npm install -g @anthropic-ai/claude-code
+        Update-AiCliPath
+    }
+    if (-not (Get-Command claude -ErrorAction SilentlyContinue)) {
+        throw "claude was not found after installation."
+    }
 }
 
 # --- 1. Install Scoop -------------------------------------------------------
@@ -154,7 +280,26 @@ foreach ($t in $tools) {
     }
 }
 
-# --- 5. Install PSFzf module (for Ctrl+R / Ctrl+T) --------------------------
+# --- 5. Ensure Node.js LTS --------------------------------------------------
+# Skip when a sufficiently new node/npm/npx toolchain is already available
+# outside Scoop, to avoid installing a second copy on developer machines.
+Write-Step "Ensuring Node.js $NodeMajor.x LTS..."
+$nodeMajorNow = Get-NodeMajor
+$hasNodeToolchain = $nodeMajorNow -and
+                    ($nodeMajorNow -ge $NodeMajor) -and
+                    (Get-Command npm -ErrorAction SilentlyContinue) -and
+                    (Get-Command npx -ErrorAction SilentlyContinue)
+if ($hasNodeToolchain) {
+    Write-Skip "node $(node --version), npm, and npx already available."
+} else {
+    scoop install nodejs-lts
+}
+
+# --- 6. Install AI coding CLIs ----------------------------------------------
+Install-CodexCli
+Install-ClaudeCodeCli
+
+# --- 7. Install PSFzf module (for Ctrl+R / Ctrl+T) --------------------------
 Write-Step "Installing PSFzf module..."
 if (Get-Module PSFzf -ListAvailable) {
     Write-Skip "PSFzf already installed."
@@ -162,7 +307,7 @@ if (Get-Module PSFzf -ListAvailable) {
     Install-Module -Name PSFzf -Scope CurrentUser -Force
 }
 
-# --- 6. Install the PowerShell profile --------------------------------------
+# --- 8. Install the PowerShell profile --------------------------------------
 if ($NoProfile) {
     Write-Skip "Profile install skipped (-NoProfile)."
 } else {
@@ -183,7 +328,7 @@ if ($NoProfile) {
     }
 }
 
-# --- 7. Install the vim config (_vimrc) -------------------------------------
+# --- 9. Install the vim config (_vimrc) -------------------------------------
 if ($NoProfile) {
     Write-Skip "vim config install skipped (-NoProfile)."
 } else {
@@ -208,9 +353,9 @@ if ($NoProfile) {
 
 # Git aliases are no longer configured here: they ship as oh-my-zsh-style shell
 # shortcuts (gst / gco / gd / gp / ...) in the PowerShell profile installed in
-# step 6, so they load in every shell without touching your ~/.gitconfig.
+# step 8, so they load in every shell without touching your ~/.gitconfig.
 
-# --- 8. OpenSSH Server (requires an elevated/admin session) -----------------
+# --- 10. OpenSSH Server (requires an elevated/admin session) ----------------
 # Installs the Windows OpenSSH Server feature, enables sshd, listens on ports
 # 22 + 58888, restricts logins to admins/"openssh users", opens the firewall
 # for both ports, and points the SSH default shell at pwsh so that

@@ -7,11 +7,11 @@ on:
   workflow_dispatch:
 
 jobs:
-  lint:
-    name: Lint (parse + PSScriptAnalyzer)
+  windows-lint:
+    name: Windows lint
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Parse PowerShell scripts
         shell: pwsh
@@ -40,15 +40,33 @@ jobs:
           $r | Format-Table -AutoSize
           if ($r) { exit 1 }
 
-  install:
-    name: Install + verify
+  ubuntu-lint:
+    name: Ubuntu lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Parse bash scripts
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash -n install-ubuntu.sh
+          bash -n config/bashrc
+
+      - name: ShellCheck
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y shellcheck
+          shellcheck -s bash install-ubuntu.sh config/bashrc
+
+  windows-install:
+    name: Windows install + verify
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      # Runs the full installer except the OpenSSH step (-NoSsh), which would
-      # reconfigure the runner's sshd. The runner is elevated, so scoop installs
-      # with -RunAsAdmin (handled inside the script).
       - name: Run installer (-NoSsh)
         shell: pwsh
         run: .\install.ps1 -NoSsh
@@ -56,8 +74,15 @@ jobs:
       - name: Verify CLI tools are on PATH
         shell: pwsh
         run: |
-          $env:Path = "$env:USERPROFILE\scoop\shims;$env:Path"
-          $tools = 'git', 'gh', 'rg', 'fd', 'bat', 'fzf', 'jq', '7z', 'eza', 'vim', 'zoxide'
+          $npmPrefix = (npm config get prefix 2>$null | Select-Object -First 1)
+          $extraPaths = @(
+            "$env:USERPROFILE\scoop\shims",
+            "$env:LOCALAPPDATA\Programs\OpenAI\Codex\bin",
+            "$env:USERPROFILE\.local\bin",
+            $npmPrefix
+          ) | Where-Object { $_ -and (Test-Path $_) }
+          $env:Path = (($extraPaths + @($env:Path)) -join ';')
+          $tools = 'git', 'gh', 'rg', 'fd', 'bat', 'fzf', 'jq', '7z', 'eza', 'vim', 'zoxide', 'node', 'npm', 'npx', 'codex', 'claude'
           $missing = @()
           foreach ($t in $tools) {
             if (Get-Command $t -ErrorAction SilentlyContinue) { Write-Host "OK: $t" }
@@ -68,12 +93,69 @@ jobs:
       - name: Verify the profile loads cleanly
         shell: pwsh
         run: |
-          # zoxide / PSFzf / PSReadLine bindings are all guarded, so dot-sourcing
-          # the installed profile must succeed without throwing.
           . $PROFILE
           if (-not (Test-Path Function:\ll)) { Write-Host "::error::profile did not define 'll'"; exit 1 }
-          # Git shortcuts (oh-my-zsh style, read-only) are defined as functions.
           foreach ($fn in 'gst', 'gd', 'gdca', 'glog', 'gsh') {
             if (-not (Test-Path "Function:\$fn")) { Write-Host "::error::profile did not define git shortcut '$fn'"; exit 1 }
           }
           Write-Host "profile loaded OK"
+
+  ubuntu-install:
+    name: Ubuntu install + verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Run installer (--no-ssh)
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash ./install-ubuntu.sh --no-ssh
+
+      - name: Verify CLI tools are on PATH
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PATH="$HOME/.local/bin:$PATH"
+          tools=(git gh rg fd bat fzf jq 7z eza vim zoxide node npm npx codex claude)
+          missing=()
+          for tool in "${tools[@]}"; do
+            if command -v "$tool" >/dev/null 2>&1; then
+              echo "OK: $tool"
+            else
+              echo "::error::missing tool: $tool"
+              missing+=("$tool")
+            fi
+          done
+          if ((${#missing[@]})); then exit 1; fi
+
+      - name: Verify bash profile loads cleanly
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PATH="$HOME/.local/bin:$PATH"
+          shopt -s expand_aliases
+          # shellcheck source=/dev/null
+          source "$HOME/.bashrc.d/cli-setup.bash"
+          for name in ll gst gd gdca glog gsh; do
+            type "$name" >/dev/null
+            echo "OK: $name"
+          done
+
+      - name: Verify Ubuntu fzf key bindings
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -r "$HOME/.bashrc.d/cli-setup.bash"
+          grep -F "key-bindings.bash" "$HOME/.bashrc.d/cli-setup.bash" >/dev/null
+          grep -F "completion.bash" "$HOME/.bashrc.d/cli-setup.bash" >/dev/null
+          if [[ ! -r /usr/share/doc/fzf/examples/key-bindings.bash && ! -r /usr/share/fzf/key-bindings.bash ]]; then
+            echo "::error::fzf key-bindings.bash was not installed"
+            exit 1
+          fi
+          bash -ic '
+            set -e
+            export PATH="$HOME/.local/bin:$PATH"
+            source "$HOME/.bashrc.d/cli-setup.bash"
+            echo "fzf Ctrl+T/Ctrl+R bindings loaded"
+          '
