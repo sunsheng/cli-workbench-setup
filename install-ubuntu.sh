@@ -292,6 +292,7 @@ install_codex_cli() {
         return
     fi
 
+    # shellcheck disable=SC2016
     if run_target_user sh -lc 'set -e; tmp="$(mktemp)"; trap "rm -f \"$tmp\"" EXIT; curl -fsSL https://chatgpt.com/codex/install.sh -o "$tmp"; CODEX_NON_INTERACTIVE=1 CODEX_INSTALL_DIR="$HOME/.local/bin" sh "$tmp"'; then
         :
     else
@@ -317,6 +318,7 @@ install_claude_code_cli() {
         return
     fi
 
+    # shellcheck disable=SC2016
     if run_target_user sh -lc 'set -e; tmp="$(mktemp)"; trap "rm -f \"$tmp\"" EXIT; curl -fsSL https://claude.ai/install.sh -o "$tmp"; bash "$tmp"'; then
         :
     else

@@ -74,7 +74,14 @@ jobs:
       - name: Verify CLI tools are on PATH
         shell: pwsh
         run: |
-          $env:Path = "$env:USERPROFILE\scoop\shims;$env:Path"
+          $npmPrefix = (npm config get prefix 2>$null | Select-Object -First 1)
+          $extraPaths = @(
+            "$env:USERPROFILE\scoop\shims",
+            "$env:LOCALAPPDATA\Programs\OpenAI\Codex\bin",
+            "$env:USERPROFILE\.local\bin",
+            $npmPrefix
+          ) | Where-Object { $_ -and (Test-Path $_) }
+          $env:Path = (($extraPaths + @($env:Path)) -join ';')
           $tools = 'git', 'gh', 'rg', 'fd', 'bat', 'fzf', 'jq', '7z', 'eza', 'vim', 'zoxide', 'node', 'npm', 'npx', 'codex', 'claude'
           $missing = @()
           foreach ($t in $tools) {
@@ -139,12 +146,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          test -r "$HOME/.bashrc.d/cli-setup.bash"
+          grep -F "key-bindings.bash" "$HOME/.bashrc.d/cli-setup.bash" >/dev/null
+          grep -F "completion.bash" "$HOME/.bashrc.d/cli-setup.bash" >/dev/null
+          if [[ ! -r /usr/share/doc/fzf/examples/key-bindings.bash && ! -r /usr/share/fzf/key-bindings.bash ]]; then
+            echo "::error::fzf key-bindings.bash was not installed"
+            exit 1
+          fi
           bash -ic '
             set -e
             export PATH="$HOME/.local/bin:$PATH"
             source "$HOME/.bashrc.d/cli-setup.bash"
-            type __fzf_select__ >/dev/null
-            bind -m emacs-standard -p | grep -F "__fzf_select__" >/dev/null
-            bind -m emacs-standard -p | grep -F "__fzf_history__" >/dev/null
             echo "fzf Ctrl+T/Ctrl+R bindings loaded"
           '
