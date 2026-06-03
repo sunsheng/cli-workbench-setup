@@ -413,6 +413,49 @@ install_eza_release() {
     rm -rf "$tmp"
 }
 
+ensure_locale_line() {
+    local loc="$1"
+    local line="$loc UTF-8"
+    local escaped="${loc//./\\.}"
+    if run_root grep -Fxq "$line" /etc/locale.gen 2>/dev/null; then
+        return
+    fi
+    if run_root grep -Eq "^#[[:space:]]*${escaped} UTF-8([[:space:]]|$)" /etc/locale.gen 2>/dev/null; then
+        run_root sed -ri "s|^#[[:space:]]*(${escaped} UTF-8)|\1|" /etc/locale.gen
+    else
+        printf '%s\n' "$line" | run_root tee -a /etc/locale.gen >/dev/null
+    fi
+}
+
+# Generate UTF-8 locales so SSH sessions that forward an ungenerated locale
+# (e.g. a macOS/Linux client sending LC_ALL=zh_CN.UTF-8) stop printing
+# "setlocale: cannot change locale". en_US.UTF-8 and zh_CN.UTF-8 are always
+# generated; any UTF-8 locale forwarded into *this* session is added too.
+configure_locale() {
+    step "Ensuring UTF-8 locales..."
+    apt_install locales
+
+    local wanted=(en_US.UTF-8 zh_CN.UTF-8)
+    local v
+    for v in "${LC_ALL:-}" "${LANG:-}" "${LC_CTYPE:-}" "${LC_MESSAGES:-}"; do
+        case "$v" in
+            ?*.[Uu][Tt][Ff]*) wanted+=("${v%%.*}.UTF-8") ;;
+        esac
+    done
+
+    local loc
+    for loc in "${wanted[@]}"; do
+        ensure_locale_line "$loc"
+    done
+    run_root locale-gen
+
+    # Give the system a stable default when none is configured (a bare server
+    # otherwise sits on C/POSIX). Never override an existing LANG.
+    if [[ ! -s /etc/default/locale ]] || ! run_root grep -q '^LANG=' /etc/default/locale 2>/dev/null; then
+        run_root update-locale LANG=en_US.UTF-8
+    fi
+}
+
 install_tools() {
     step "Installing CLI tools..."
     enable_universe
@@ -549,6 +592,7 @@ configure_ssh() {
     restart_ssh_service
 }
 
+configure_locale
 install_tools
 install_profile
 configure_ssh

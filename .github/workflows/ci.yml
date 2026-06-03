@@ -55,6 +55,7 @@ jobs:
         run: |
           set -euo pipefail
           bash -n install-ubuntu.sh
+          bash -n create-user-ubuntu.sh
           bash -n config/bashrc
 
       - name: ShellCheck
@@ -63,7 +64,45 @@ jobs:
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install -y shellcheck
-          shellcheck -s bash install-ubuntu.sh config/bashrc
+          shellcheck -s bash install-ubuntu.sh create-user-ubuntu.sh config/bashrc
+
+  ubuntu-create-user:
+    name: Ubuntu create-user + verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Create user + install environment (as root)
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo bash ./create-user-ubuntu.sh ciuser
+
+      - name: Verify user, group, and passwordless sudo
+        shell: bash
+        run: |
+          set -euo pipefail
+          id ciuser
+          id -nG ciuser | tr ' ' '\n' | grep -qx sudo
+          test -f /etc/sudoers.d/90-ciuser-nopasswd
+          sudo visudo -cf /etc/sudoers.d/90-ciuser-nopasswd
+          # The whole point: sudo without a password prompt.
+          sudo -n -u ciuser sudo -n true
+          echo "passwordless sudo OK for ciuser"
+
+      - name: Verify claude / codex installed in the new user's home
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Tools land in ciuser's ~/.local/bin; check as that user via a login shell.
+          sudo -iu ciuser bash -lc '
+            set -e
+            export PATH="$HOME/.local/bin:$PATH"
+            for t in node claude codex; do
+              command -v "$t" >/dev/null || { echo "::error::missing for ciuser: $t"; exit 1; }
+              echo "OK: $t"
+            done
+          '
 
   windows-install:
     name: Windows install + verify
