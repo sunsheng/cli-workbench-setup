@@ -67,7 +67,10 @@ printf '%s ALL=(ALL) NOPASSWD:ALL\n' "$NEW_USER" > "$SUDOERS_TMP"
 run_root visudo -cf "$SUDOERS_TMP" >/dev/null || { rm -f "$SUDOERS_TMP"; die "sudoers syntax check failed."; }
 run_root install -m 0440 -o root -g root "$SUDOERS_TMP" "$SUDOERS_FILE"
 rm -f "$SUDOERS_TMP"
-run_root visudo -c >/dev/null || die "visudo -c failed after writing $SUDOERS_FILE."
+# Validate just our installed file — not the whole sudoers (a foreign drop-in
+# with sloppy perms, e.g. CI runners' /etc/sudoers.d/runner, would fail visudo -c
+# through no fault of ours).
+run_root visudo -cf "$SUDOERS_FILE" >/dev/null || die "visudo check failed for $SUDOERS_FILE."
 
 # --- Install the environment as the new user --------------------------------
 # Locate a bundled install-ubuntu.sh next to this script (clone), else fetch it.
@@ -77,7 +80,11 @@ if [[ -n "$SCRIPT_SOURCE" ]]; then
     if [[ "$SCRIPT_SOURCE" != /* ]]; then
         SCRIPT_SOURCE="$PWD/$SCRIPT_SOURCE"
     fi
-    SCRIPT_DIR="$(cd -P -- "$(dirname -- "$SCRIPT_SOURCE")" >/dev/null 2>&1 && pwd -P || true)"
+    if SCRIPT_DIR="$(cd -P -- "$(dirname -- "$SCRIPT_SOURCE")" >/dev/null 2>&1 && pwd -P)"; then
+        :
+    else
+        SCRIPT_DIR=""
+    fi
     if [[ -n "$SCRIPT_DIR" && -f "$SCRIPT_DIR/install-ubuntu.sh" ]]; then
         INSTALLER="$SCRIPT_DIR/install-ubuntu.sh"
     fi
