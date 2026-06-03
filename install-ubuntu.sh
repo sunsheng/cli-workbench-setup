@@ -366,9 +366,9 @@ install_claude_code_cli() {
     # Preferred: native binary direct from downloads.claude.ai (works from datacenter
     # IPs). Fallback 1: claude.ai/install.sh (works from residential IPs / via proxy).
     # Fallback 2: npm.
+    # shellcheck disable=SC2016
     if download_claude_native; then
         :
-    # shellcheck disable=SC2016
     elif run_target_user sh -lc 'set -e; tmp="$(mktemp)"; trap "rm -f \"$tmp\"" EXIT; curl -fsSL https://claude.ai/install.sh -o "$tmp"; bash "$tmp"'; then
         :
     else
