@@ -63,7 +63,13 @@ if [[ "$(id -u)" -eq 0 ]]; then
     SUDO=()
 else
     command_exists sudo || die "sudo is required when not running as root."
-    sudo -v
+    # Pre-warm sudo credentials for interactive use, but skip when sudo is already
+    # passwordless: `sudo -v` can still demand a password for a NOPASSWD user and
+    # would then fail in a non-interactive session with no tty (e.g. when
+    # create-user-ubuntu.sh runs this as a freshly created NOPASSWD user).
+    if ! sudo -n true 2>/dev/null; then
+        sudo -v
+    fi
     SUDO=(sudo)
 fi
 
