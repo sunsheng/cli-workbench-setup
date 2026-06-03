@@ -35,7 +35,11 @@ jobs:
       - name: PSScriptAnalyzer
         shell: pwsh
         run: |
-          Install-Module PSScriptAnalyzer -Force -Scope CurrentUser -SkipPublisherCheck
+          if (-not (Get-PSRepository -Name PSGallery -ErrorAction SilentlyContinue)) {
+            Register-PSRepository -Default
+          }
+          Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
+          Install-Module PSScriptAnalyzer -Force -Scope CurrentUser -SkipPublisherCheck -Repository PSGallery
           $r = Invoke-ScriptAnalyzer -Path . -Recurse -Severity Error
           $r | Format-Table -AutoSize
           if ($r) { exit 1 }
