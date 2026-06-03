@@ -65,19 +65,6 @@ jobs:
           }
           if ($missing) { exit 1 }
 
-      - name: Verify git aliases
-        shell: pwsh
-        run: |
-          $expected = @{ st = 'status -sb'; df = 'diff'; dc = 'diff --cached';
-                         lg = 'log --graph --oneline --decorate --all'; last = 'log -1 HEAD --stat' }
-          $bad = $false
-          foreach ($a in $expected.Keys) {
-            $v = git config --global --get "alias.$a"
-            if ($v -eq $expected[$a]) { Write-Host "OK: git $a = $v" }
-            else { Write-Host "::error::alias '$a' = '$v' (expected '$($expected[$a])')"; $bad = $true }
-          }
-          if ($bad) { exit 1 }
-
       - name: Verify the profile loads cleanly
         shell: pwsh
         run: |
@@ -85,4 +72,8 @@ jobs:
           # the installed profile must succeed without throwing.
           . $PROFILE
           if (-not (Test-Path Function:\ll)) { Write-Host "::error::profile did not define 'll'"; exit 1 }
+          # Git shortcuts (oh-my-zsh style, read-only) are defined as functions.
+          foreach ($fn in 'gst', 'gd', 'gdca', 'glog', 'gsh') {
+            if (-not (Test-Path "Function:\$fn")) { Write-Host "::error::profile did not define git shortcut '$fn'"; exit 1 }
+          }
           Write-Host "profile loaded OK"

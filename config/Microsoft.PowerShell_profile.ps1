@@ -72,3 +72,16 @@ if (Get-Module PSReadLine -ListAvailable) {
     # host, so the previous scriptblock version did nothing on an empty line.
     Set-PSReadLineKeyHandler -Chord 'Ctrl+d' -Function DeleteCharOrExit
 }
+
+# ===== Git aliases (oh-my-zsh `git` plugin style — read-only / inspection) =====
+# Shell-level shortcuts for *looking* at a repo (status / diff / log / show),
+# using oh-my-zsh's git plugin names. NOT `git config` subcommand aliases, so
+# they work in every shell without touching ~/.gitconfig. Defined as functions
+# so extra arguments flow through via @args (e.g. `gd HEAD~1`, `gsh <sha>`).
+function gst   { git status @args }                                 # status
+function gss   { git status -s @args }                              # short status
+function gd    { git diff @args }                                   # unstaged changes
+function gdca  { git diff --cached @args }                          # staged changes
+function glog  { git log --oneline --decorate --graph @args }       # compact log + graph
+function glola { git log --graph --oneline --decorate --all @args } # graph of all branches
+function gsh   { git show @args }                                   # show a commit

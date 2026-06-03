@@ -48,14 +48,13 @@ cd windows-cli-setup
 3. 添加 `extras` bucket
 4. 安装上表中的所有 CLI 工具
 5. 安装 `PSFzf` 模块
-6. 把 `config/Microsoft.PowerShell_profile.ps1` 复制到你的 `$PROFILE`（已有的会自动备份为 `*.bak-<时间戳>`）
+6. 把 `config/Microsoft.PowerShell_profile.ps1` 复制到你的 `$PROFILE`（已有的会自动备份为 `*.bak-<时间戳>`）——其中包含 oh-my-zsh 风格的 git 查看别名（`gst` / `gd` / `glog` / `gsh` ...）
 7. 把 `config/_vimrc` 复制到 `$HOME\_vimrc` 并创建撤销目录 `vimfiles\undo`（已有的会自动备份）
-8. 配置常用 git 别名（`st` / `df` / `dc` / `lg` / `last`）
-9. **（需管理员）** 安装并配置 OpenSSH Server：启用 `sshd` 服务、监听 `22` + `58888` 端口、限制登录组为 `administrators` / `openssh users`、放行对应防火墙、把 SSH 默认 shell 设为 `pwsh`；非管理员或加 `-NoSsh` 时跳过此步
+8. **（需管理员）** 安装并配置 OpenSSH Server：启用 `sshd` 服务、监听 `22` + `58888` 端口、限制登录组为 `administrators` / `openssh users`、放行对应防火墙、把 SSH 默认 shell 设为 `pwsh`；非管理员或加 `-NoSsh` 时跳过此步
 
 > 脚本可重复运行——每一步都会先检查是否已安装。
 >
-> 只想装工具、不动个人配置（profile / `_vimrc` / git 别名）？加 `-NoProfile`：`.\install.ps1 -NoProfile`
+> 只想装工具、不动个人配置（profile / `_vimrc`，git 别名也在 profile 里）？加 `-NoProfile`：`.\install.ps1 -NoProfile`
 >
 > 不想配置 OpenSSH Server？加 `-NoSsh` 跳过那一步：`.\install.ps1 -NoSsh`（两个开关可同时用）。
 >
@@ -123,17 +122,19 @@ something | jq '.key'        # 提取 JSON 字段
 7z a archive.7z folder\      # 压缩
 ```
 
-### Git 别名
+### Git 别名（oh-my-zsh 风格，仅查看类）
 
-脚本通过 `git config --global` 写入以下别名（只动 `alias.*`，不会覆盖你的姓名/邮箱等配置）：
+profile 里定义了一组 oh-my-zsh `git` 插件风格的 **shell** 别名（函数），只覆盖**查看仓库状态**用的命令，不动 `~/.gitconfig`。额外参数会透传（例如 `gd HEAD~1`、`gsh <sha>`）：
 
 | 别名 | 等价命令 | 说明 |
 |------|----------|------|
-| `git st` | `status -sb` | 精简状态 + 分支行 |
-| `git df` | `diff` | 查看**未暂存**改动 |
-| `git dc` | `diff --cached` | 查看**已暂存**改动 |
-| `git lg` | `log --graph --oneline --decorate --all` | 所有分支的紧凑提交图 |
-| `git last` | `log -1 HEAD --stat` | 最近一次提交及改动文件 |
+| `gst` | `git status` | 工作区状态 |
+| `gss` | `git status -s` | 精简状态 |
+| `gd` | `git diff` | 查看**未暂存**改动 |
+| `gdca` | `git diff --cached` | 查看**已暂存**改动 |
+| `glog` | `git log --oneline --decorate --graph` | 紧凑提交图 |
+| `glola` | `git log --graph --oneline --decorate --all` | 所有分支的紧凑提交图 |
+| `gsh` | `git show` | 查看某次提交 |
 
 ### SSH 远程登录（OpenSSH Server）
 
@@ -191,7 +192,7 @@ scoop uninstall <name>  # 卸载
 仓库带了一个 GitHub Actions 工作流 [`​.github/workflows/ci.yml`](.github/workflows/ci.yml)，在 `push` / `pull_request` / 手动触发时于 **Windows runner** 上：
 
 1. **lint**：解析 `install.ps1` 与 profile、跑 PSScriptAnalyzer（Error 级）；
-2. **install**：执行 `.\install.ps1 -NoSsh`，然后校验所有 CLI 工具在 PATH 上、git 别名已写入、profile 能干净加载。
+2. **install**：执行 `.\install.ps1 -NoSsh`，然后校验所有 CLI 工具在 PATH 上、profile 能干净加载（含 git 查看别名 `gst` / `gd` / `glog` ...）。
 
 ## License
 

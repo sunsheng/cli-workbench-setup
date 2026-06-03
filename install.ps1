@@ -20,7 +20,7 @@
 #>
 [CmdletBinding()]
 param(
-    # Skip the personal config (PowerShell profile, _vimrc, git aliases).
+    # Skip the personal config (PowerShell profile, _vimrc — git aliases live in the profile).
     [switch]$NoProfile,
     # Skip the OpenSSH Server step (it also requires an elevated session).
     [switch]$NoSsh
@@ -142,8 +142,8 @@ $tools = @(
     'eza',       # eza - modern ls / tree
     'vim',       # vim - text editor
     'zoxide'     # z   - smarter cd
-)   # NOTE: pwsh (PowerShell 7) is expected to be already installed; step 10
-    #       just points the SSH default shell at it.
+)   # NOTE: pwsh (PowerShell 7) is expected to be already installed; the SSH
+    #       step below just points the SSH default shell at it.
 Write-Step "Installing CLI tools..."
 $installed = (scoop list 6>$null | Select-Object -ExpandProperty Name)
 foreach ($t in $tools) {
@@ -206,27 +206,11 @@ if ($NoProfile) {
     }
 }
 
-# --- 8. Git aliases (status / diff / log shortcuts) -------------------------
-# Written with `git config --global alias.*`, so only the alias.* keys are
-# touched - your existing name/email/etc. in .gitconfig are left untouched.
-if ($NoProfile) {
-    Write-Skip "Git aliases skipped (-NoProfile)."
-} else {
-    Write-Step "Configuring git aliases..."
-    $gitAliases = [ordered]@{
-        st   = 'status -sb'                             # short status + branch line
-        df   = 'diff'                                   # unstaged changes
-        dc   = 'diff --cached'                          # staged changes
-        lg   = 'log --graph --oneline --decorate --all' # compact graph of all branches
-        last = 'log -1 HEAD --stat'                     # most recent commit + files touched
-    }
-    foreach ($name in $gitAliases.Keys) {
-        git config --global "alias.$name" $gitAliases[$name]
-    }
-    Write-Host "    Aliases set: $($gitAliases.Keys -join ', ')  (e.g. 'git st', 'git lg')" -ForegroundColor Green
-}
+# Git aliases are no longer configured here: they ship as oh-my-zsh-style shell
+# shortcuts (gst / gco / gd / gp / ...) in the PowerShell profile installed in
+# step 6, so they load in every shell without touching your ~/.gitconfig.
 
-# --- 9. OpenSSH Server (requires an elevated/admin session) -----------------
+# --- 8. OpenSSH Server (requires an elevated/admin session) -----------------
 # Installs the Windows OpenSSH Server feature, enables sshd, listens on ports
 # 22 + 58888, restricts logins to admins/"openssh users", opens the firewall
 # for both ports, and points the SSH default shell at pwsh so that
