@@ -1,0 +1,63 @@
+# Modern CLI aliases installed by install-ubuntu.sh.
+
+case ":$PATH:" in
+    *":$HOME/.local/bin:"*) ;;
+    *) export PATH="$HOME/.local/bin:$PATH" ;;
+esac
+
+# eza: modern replacement for ls / tree.
+if command -v eza >/dev/null 2>&1; then
+    alias ls='eza --icons --group-directories-first'
+    alias ll='eza --icons -la --group-directories-first --git'
+    alias la='eza --icons -a --group-directories-first'
+    alias lt='eza --icons --tree --level=2'
+    alias tree='eza --icons --tree'
+fi
+
+# bat: cat with syntax highlighting. Debian/Ubuntu may package it as batcat.
+if command -v bat >/dev/null 2>&1; then
+    alias cat='bat'
+elif command -v batcat >/dev/null 2>&1; then
+    alias cat='batcat'
+fi
+
+# zoxide: smarter cd.
+if command -v zoxide >/dev/null 2>&1; then
+    eval "$(zoxide init bash)"
+fi
+
+# fzf key bindings and completion for interactive bash sessions.
+if [[ $- == *i* ]]; then
+    if command -v fd >/dev/null 2>&1; then
+        export FZF_CTRL_T_COMMAND="${FZF_CTRL_T_COMMAND:-fd --type f --hidden --follow --exclude .git}"
+    fi
+
+    for fzf_file in \
+        /usr/share/doc/fzf/examples/key-bindings.bash \
+        /usr/share/fzf/key-bindings.bash; do
+        if [[ -r "$fzf_file" ]]; then
+            # shellcheck source=/dev/null
+            . "$fzf_file"
+            break
+        fi
+    done
+
+    for fzf_file in \
+        /usr/share/doc/fzf/examples/completion.bash \
+        /usr/share/fzf/completion.bash; do
+        if [[ -r "$fzf_file" ]]; then
+            # shellcheck source=/dev/null
+            . "$fzf_file"
+            break
+        fi
+    done
+fi
+
+# Git aliases (oh-my-zsh git plugin style, read-only / inspection).
+alias gst='git status'
+alias gss='git status -s'
+alias gd='git diff'
+alias gdca='git diff --cached'
+alias glog='git log --oneline --decorate --graph'
+alias glola='git log --graph --oneline --decorate --all'
+alias gsh='git show'

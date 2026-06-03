@@ -4,7 +4,8 @@
     One-shot setup for a modern Windows command-line environment.
 
 .DESCRIPTION
-    Installs the Scoop package manager, a set of common CLI tools, and the
+    Installs the Scoop package manager, a set of common CLI tools, Node.js LTS,
+    and the
     PSFzf module, then installs the bundled PowerShell profile that wires up
     aliases (eza/bat) and keybindings (fzf Ctrl+R / Ctrl+T) and zoxide.
 
@@ -27,6 +28,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+$NodeMajor = 24
 
 function Write-Step($msg) { Write-Host "==> $msg" -ForegroundColor Cyan }
 function Write-Skip($msg) { Write-Host "    (skip) $msg" -ForegroundColor DarkGray }
@@ -83,6 +85,17 @@ function Add-SshdGlobalLines($path, [string[]]$lines) {
     # ASCII keeps the file BOM-free; a BOM on the first line breaks sshd parsing.
     Set-Content -Path $path -Value $new -Encoding ascii
     return $true
+}
+
+function Get-NodeMajor {
+    if (-not (Get-Command node -ErrorAction SilentlyContinue)) { return $null }
+    try {
+        $major = & node -p "process.versions.node.split('.')[0]" 2>$null
+        if ($major -match '^\d+$') { return [int]$major }
+    } catch {
+        return $null
+    }
+    return $null
 }
 
 # --- 1. Install Scoop -------------------------------------------------------
@@ -154,7 +167,22 @@ foreach ($t in $tools) {
     }
 }
 
-# --- 5. Install PSFzf module (for Ctrl+R / Ctrl+T) --------------------------
+# --- 5. Ensure Node.js LTS --------------------------------------------------
+# Skip when a sufficiently new node/npm/npx toolchain is already available
+# outside Scoop, to avoid installing a second copy on developer machines.
+Write-Step "Ensuring Node.js $NodeMajor.x LTS..."
+$nodeMajorNow = Get-NodeMajor
+$hasNodeToolchain = $nodeMajorNow -and
+                    ($nodeMajorNow -ge $NodeMajor) -and
+                    (Get-Command npm -ErrorAction SilentlyContinue) -and
+                    (Get-Command npx -ErrorAction SilentlyContinue)
+if ($hasNodeToolchain) {
+    Write-Skip "node $(node --version), npm, and npx already available."
+} else {
+    scoop install nodejs-lts
+}
+
+# --- 6. Install PSFzf module (for Ctrl+R / Ctrl+T) --------------------------
 Write-Step "Installing PSFzf module..."
 if (Get-Module PSFzf -ListAvailable) {
     Write-Skip "PSFzf already installed."
@@ -162,7 +190,7 @@ if (Get-Module PSFzf -ListAvailable) {
     Install-Module -Name PSFzf -Scope CurrentUser -Force
 }
 
-# --- 6. Install the PowerShell profile --------------------------------------
+# --- 7. Install the PowerShell profile --------------------------------------
 if ($NoProfile) {
     Write-Skip "Profile install skipped (-NoProfile)."
 } else {
@@ -183,7 +211,7 @@ if ($NoProfile) {
     }
 }
 
-# --- 7. Install the vim config (_vimrc) -------------------------------------
+# --- 8. Install the vim config (_vimrc) -------------------------------------
 if ($NoProfile) {
     Write-Skip "vim config install skipped (-NoProfile)."
 } else {
@@ -208,9 +236,9 @@ if ($NoProfile) {
 
 # Git aliases are no longer configured here: they ship as oh-my-zsh-style shell
 # shortcuts (gst / gco / gd / gp / ...) in the PowerShell profile installed in
-# step 6, so they load in every shell without touching your ~/.gitconfig.
+# step 7, so they load in every shell without touching your ~/.gitconfig.
 
-# --- 8. OpenSSH Server (requires an elevated/admin session) -----------------
+# --- 9. OpenSSH Server (requires an elevated/admin session) -----------------
 # Installs the Windows OpenSSH Server feature, enables sshd, listens on ports
 # 22 + 58888, restricts logins to admins/"openssh users", opens the firewall
 # for both ports, and points the SSH default shell at pwsh so that
