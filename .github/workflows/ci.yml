@@ -83,7 +83,10 @@ jobs:
         run: |
           set -euo pipefail
           id ciuser
-          id -nG ciuser | tr ' ' '\n' | grep -qx sudo
+          # Membership check without a pipe: `grep -q` would SIGPIPE its upstream
+          # and trip pipefail even on success.
+          groups_list=" $(id -nG ciuser) "
+          [[ "$groups_list" == *" sudo "* ]] || { echo "::error::ciuser not in sudo group"; exit 1; }
           test -f /etc/sudoers.d/90-ciuser-nopasswd
           sudo visudo -cf /etc/sudoers.d/90-ciuser-nopasswd
           # The whole point: sudo without a password prompt.
