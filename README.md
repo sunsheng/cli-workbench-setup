@@ -30,7 +30,7 @@
 | build-essential | `gcc` / `make` | 不需要 | 安装 | Ubuntu 常用 native build 工具 |
 | PSFzf | PowerShell 模块 | 安装 | 不需要 | PowerShell 的 fzf/PSReadLine 集成 |
 | PowerShell 7 | `pwsh` | **需预先安装** | 不安装 | Windows SSH 默认 shell 使用 |
-| OpenSSH Server | `sshd` | 可配置 | 可配置 | 监听 22 + 58888 |
+| OpenSSH Server | `sshd` | 可配置 | 可配置 | 仅监听 58888，禁用密码登录 |
 
 > 字体（Nerd Font）不在服务器上安装。图标由**客户端终端**渲染，客户端字体配置见[备注](#备注)。
 
@@ -100,7 +100,7 @@ Ubuntu 脚本会使用 `sudo` 安装系统包。默认 Node.js 目标为 24.x LT
 7. 安装 `PSFzf` 模块
 8. 复制 `config/Microsoft.PowerShell_profile.ps1` 到 `$PROFILE`，已有文件自动备份为 `*.bak-<时间戳>`
 9. 复制 `config/_vimrc` 到 `$HOME\_vimrc`，并创建 `vimfiles\undo`
-10. 管理员会话下配置 OpenSSH Server：启用 `sshd`、监听 `22` + `58888`、限制登录组、放行防火墙、把 SSH 默认 shell 设为 `pwsh`
+10. 管理员会话下配置 OpenSSH Server：启用 `sshd`、仅监听 `58888`、禁用密码登录（仅密钥）、限制登录组、放行防火墙、把 SSH 默认 shell 设为 `pwsh`
 
 ### Ubuntu Server 安装内容
 
@@ -111,8 +111,8 @@ Ubuntu 脚本会使用 `sudo` 安装系统包。默认 Node.js 目标为 24.x LT
 5. 为 Debian/Ubuntu 的 `fdfind` / `batcat` 创建用户级 `fd` / `bat` shim
 6. 安装 `config/bashrc` 到 `~/.bashrc.d/cli-setup.bash`，并在 `~/.bashrc` 追加幂等 source 块
 7. 安装 `config/vimrc` 到 `~/.vimrc`，并创建 `~/.vim/undo`
-8. 默认安装并配置 OpenSSH Server：监听 `22` + `58888`，创建 `ssh-users` 组，把当前用户加入该组，写入 `/etc/ssh/sshd_config.d/99-cli-setup.conf`
-9. 如果系统已有 `ufw`，为 `22/tcp` 和 `58888/tcp` 添加 allow 规则；不会主动安装或启用 `ufw`
+8. 默认安装并配置 OpenSSH Server：仅监听 `58888`、禁用密码登录（仅密钥，并中和 cloud-init 的 `PasswordAuthentication yes`），创建 `ssh-users` 组，把当前用户加入该组，写入 `/etc/ssh/sshd_config.d/99-cli-setup.conf`
+9. 如果系统已有 `ufw`，为 `58888/tcp` 添加 allow 规则；不会主动安装或启用 `ufw`
 
 ## 使用说明
 
@@ -192,10 +192,9 @@ claude --version
 
 ### Windows
 
-管理员 PowerShell 运行脚本时会启用 `sshd` 服务、监听 `22` 和 `58888`、限制登录组为 `administrators` / `openssh users`、放行防火墙，并把 SSH 默认 shell 设为 `pwsh`。
+管理员 PowerShell 运行脚本时会启用 `sshd` 服务、仅监听 `58888`、禁用密码登录（仅密钥，公钥放在 `%ProgramData%\ssh\administrators_authorized_keys`）、限制登录组为 `administrators` / `openssh users`、放行防火墙，并把 SSH 默认 shell 设为 `pwsh`。
 
 ```powershell
-ssh <用户名>@<主机>
 ssh -p 58888 <用户名>@<主机>
 Get-Service sshd
 ```
@@ -211,9 +210,9 @@ Get-Service sshd
 内容包含：
 
 ```text
-Port 22
 Port 58888
 AllowGroups sudo ssh-users
+PasswordAuthentication no
 ```
 
 脚本会创建 `ssh-users` 组，并把运行脚本的目标用户加入该组。已有其他非 `sudo` 用户如需 SSH 登录，需要手动加入：

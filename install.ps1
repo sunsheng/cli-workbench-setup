@@ -356,11 +356,13 @@ if ($NoProfile) {
 # step 8, so they load in every shell without touching your ~/.gitconfig.
 
 # --- 10. OpenSSH Server (requires an elevated/admin session) ----------------
-# Installs the Windows OpenSSH Server feature, enables sshd, listens on ports
-# 22 + 58888, restricts logins to admins/"openssh users", opens the firewall
-# for both ports, and points the SSH default shell at pwsh so that
-# `ssh <host>` lands in PowerShell 7 instead of cmd.exe.
-$SshPorts = @(22, 58888)   # ports to listen on / open in the firewall
+# Installs the Windows OpenSSH Server feature, enables sshd, listens on port
+# 58888 only (port 22 is left off to dodge internet-wide SSH brute-force),
+# disables password auth (key-only via administrators_authorized_keys),
+# restricts logins to admins/"openssh users", opens the firewall for that
+# port, and points the SSH default shell at pwsh so that `ssh <host>` lands
+# in PowerShell 7 instead of cmd.exe.
+$SshPorts = @(58888)   # ports to listen on / open in the firewall
 Write-Step "Configuring OpenSSH Server..."
 if ($NoSsh) {
     Write-Skip "OpenSSH Server setup skipped (-NoSsh)."
@@ -381,14 +383,15 @@ if ($NoSsh) {
     Set-Service -Name sshd -StartupType Automatic
     if ((Get-Service sshd).Status -ne 'Running') { Start-Service sshd }
 
-    # 3. Apply our sshd_config customizations (extra Port + AllowGroups), then
-    #    restart sshd so they take effect. Add-SshdGlobalLines is idempotent and
-    #    inserts before the trailing `Match` block.
+    # 3. Apply our sshd_config customizations (Port + AllowGroups + key-only
+    #    auth), then restart sshd so they take effect. Add-SshdGlobalLines is
+    #    idempotent and inserts before the trailing `Match` block.
     $sshdConfig = Join-Path $env:ProgramData 'ssh\sshd_config'
     $sshdLines = @($SshPorts | ForEach-Object { "Port $_" }) +
-                 @('AllowGroups administrators "openssh users"')
+                 @('AllowGroups administrators "openssh users"',
+                   'PasswordAuthentication no')
     if (Add-SshdGlobalLines $sshdConfig $sshdLines) {
-        Write-Step "Updated sshd_config (ports $($SshPorts -join ', ') + AllowGroups); restarting sshd..."
+        Write-Step "Updated sshd_config (port $($SshPorts -join ', ') + AllowGroups + key-only auth); restarting sshd..."
         Restart-Service sshd
     } else {
         Write-Skip "sshd_config already has the desired ports / AllowGroups."
