@@ -26,7 +26,7 @@
 | zoxide | `z` | 安装 | 安装 | 智能 `cd` |
 | Node.js LTS | `node` / `npm` / `npx` | 安装或复用已有 24.x+ | 安装或复用已有 24.x+ | JavaScript/Node 开发运行时 |
 | Codex CLI | `codex` | 官网脚本安装，npm 兜底 | 官网脚本安装，npm 兜底 | OpenAI Codex 命令行编码助手 |
-| Claude Code CLI | `claude` | 官网脚本安装，npm 兜底 | 官网脚本安装，npm 兜底 | Anthropic Claude Code 命令行编码助手 |
+| Claude Code CLI | `claude` | 原生二进制优先，脚本/npm 兜底 | 原生二进制优先，脚本/npm 兜底 | Anthropic Claude Code 命令行编码助手 |
 | build-essential | `gcc` / `make` | 不需要 | 安装 | Ubuntu 常用 native build 工具 |
 | PSFzf | PowerShell 模块 | 安装 | 不需要 | PowerShell 的 fzf/PSReadLine 集成 |
 | PowerShell 7 | `pwsh` | **需预先安装** | 不安装 | Windows SSH 默认 shell 使用 |
@@ -258,12 +258,52 @@ sudo apt install <name>
 sudo apt remove <name>
 ```
 
+## macOS 客户端字体配置
+
+如果你从 **macOS** 通过终端 SSH 登录上面配置好的服务器，图标（`eza --icons`、Vim/Codex/Claude 的图形符号等）由**本地终端**渲染，需要在 macOS 客户端装一款 Nerd Font。下面给出**不使用 Homebrew** 的手动安装方式。
+
+### 1. 下载并安装 Nerd Font（无需 brew）
+
+从 [Nerd Fonts 官方 Release](https://github.com/ryanoasis/nerd-fonts/releases/latest) 下载字体压缩包并复制到用户字体目录 `~/Library/Fonts`（仅当前用户，不需要管理员权限）：
+
+```bash
+cd ~/Downloads
+# 以 JetBrainsMono 为例，可替换为 FiraCode、Hack、Meslo 等
+curl -fLO https://github.com/ryanoasis/nerd-fonts/releases/latest/download/JetBrainsMono.zip
+unzip -o JetBrainsMono.zip -d JetBrainsMono
+mkdir -p ~/Library/Fonts
+cp JetBrainsMono/*.ttf ~/Library/Fonts/
+```
+
+或图形化方式：下载并解压后，双击任意 `.ttf` 文件，在弹出的「字体册（Font Book）」中点击「安装字体」即可。
+
+安装后可验证：
+
+```bash
+ls ~/Library/Fonts | grep -i nerd
+```
+
+### 2. 在客户端终端中选用该字体
+
+- **Terminal.app（系统自带）**：菜单「终端 → 设置 → 描述文件 → 文本 → 字体」，点「更改…」选择 `JetBrainsMono Nerd Font`。
+- **iTerm2**：「Settings → Profiles → Text → Font」，选择 `JetBrainsMono Nerd Font`（推荐勾选 "Use a different font for non-ASCII text" 时也设为同一 Nerd Font）。
+- **VS Code 集成终端**：在 `settings.json` 中加入：
+
+  ```json
+  {
+    "terminal.integrated.fontFamily": "JetBrainsMono Nerd Font"
+  }
+  ```
+
+> 字体名以「`<字体> Nerd Font`」形式出现（如 `FiraCode Nerd Font`、`Hack Nerd Font`）；如需等宽对齐更稳妥，也可选用名称带 `Mono` 的变体（如 `JetBrainsMono Nerd Font Mono`）。
+
 ## 备注
 
-- **图标 / Nerd Font 装在客户端，不装在服务器**：`eza --icons` 需要客户端终端使用 Nerd Font。Windows Terminal 或 VS Code 集成终端中选择 FiraCode Nerd Font、JetBrainsMono Nerd Font 等即可。
+- **图标 / Nerd Font 装在客户端，不装在服务器**：`eza --icons` 需要客户端终端使用 Nerd Font。Windows Terminal 或 VS Code 集成终端中选择 FiraCode Nerd Font、JetBrainsMono Nerd Font 等即可。macOS 客户端字体配置见下方[macOS 客户端字体配置](#macos-客户端字体配置)。
 - **Ubuntu 不安装 `pwsh`**：Ubuntu Server 默认使用 bash；`pwsh` 只用于 Windows OpenSSH 的默认 shell。
 - **Node.js**：默认按 Node.js 24.x LTS 处理。Windows 使用 Scoop `nodejs-lts`；Ubuntu 使用 NodeSource apt 仓库。已有足够新的 `node` / `npm` / `npx` 会被复用。
-- **Codex CLI / Claude Code CLI**：安装器优先使用官方脚本。Codex 使用 `https://chatgpt.com/codex/install.*`，Claude Code 使用 `https://claude.ai/install.*`；如果官网脚本不可用，会退回到 `npm install -g @openai/codex` 与 `npm install -g @anthropic-ai/claude-code`。
+- **Codex CLI**：安装器优先使用官方脚本 `https://chatgpt.com/codex/install.*`，不可用时退回到 `npm install -g @openai/codex`。
+- **Claude Code CLI**：采用三级兜底。① 优先**直接从 `https://downloads.claude.ai/claude-code-releases` 拉原生二进制**（取 `latest` 版本号 → 下载对应平台二进制 → 用 `manifest.json` 里的 SHA256 校验 → 运行内置 `claude install`）；② 失败时退回官方入口脚本 `https://claude.ai/install.*`；③ 再失败才用 `npm install -g @anthropic-ai/claude-code`。之所以原生优先，是因为入口脚本 `claude.ai/install.*` 挂在 Cloudflare 托管质询（managed challenge）后面，**数据中心/云主机 IP（如阿里云、各云厂商）裸 `curl` 会被 403 挡住**，而 `downloads.claude.ai` 没有这层质询，能直接下载。原生安装的另一个好处是会**后台自动更新**。
 - **SSH 分组限制**：Ubuntu 侧会写入 `AllowGroups sudo ssh-users`。这和 Windows 侧限制管理员/openssh 用户组的思路一致，但会影响已有非 sudo 用户的 SSH 登录，需要把他们加入 `ssh-users`。
 
 ## 持续集成（CI）
