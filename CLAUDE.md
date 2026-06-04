@@ -7,6 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 Two parallel one-shot installers that provision the *same* modern CLI environment on two OSes:
 
 - `install.ps1` — Windows Server / Windows, via [Scoop](https://scoop.sh).
+- `add-admin-ssh-key.ps1` — Windows helper that appends a public key to `%ProgramData%\ssh\administrators_authorized_keys` and fixes its ACL.
 - `install-ubuntu.sh` — Ubuntu Server, via `apt`.
 
 They are deliberate mirrors: the same tool set (git, gh, ripgrep, fd, bat, fzf, jq, 7zip, eza, vim, zoxide, Node.js LTS, Codex CLI, Claude Code CLI), the same idempotent step structure, the same AI-CLI install strategy, and the same SSH hardening posture. **When you change behavior on one side, check whether the other side needs the mirror change** (and update `README.md`, which documents both). `config/` holds the shipped dotfiles consumed by both.
@@ -28,6 +29,7 @@ shellcheck -s bash install-ubuntu.sh config/bashrc
 ```powershell
 # PowerShell side: parse, then analyze (Error severity gates CI)
 [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path install.ps1), [ref]$null, [ref]([ref]$null).Value)
+[System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path add-admin-ssh-key.ps1), [ref]$null, [ref]([ref]$null).Value)
 Invoke-ScriptAnalyzer -Path . -Recurse -Severity Error
 ```
 
@@ -44,6 +46,7 @@ NODE_MAJOR=22 bash ./install-ubuntu.sh   # pin Node major version
 .\install.ps1            # full run (SSH step auto-skips in a non-admin session)
 .\install.ps1 -NoProfile
 .\install.ps1 -NoSsh
+.\add-admin-ssh-key.ps1 -PublicKeyPath $HOME\.ssh\id_ed25519.pub  # admin session
 ```
 
 CI (`ubuntu-latest` + `windows-latest`) runs the installer with `--no-ssh` / `-NoSsh`, then asserts every CLI is on `PATH` and that the profile defines the `ll` / git-shortcut functions. If you add a tool or a profile function, add it to the verify lists in `ci.yml`.

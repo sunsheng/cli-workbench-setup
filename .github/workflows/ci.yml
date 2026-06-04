@@ -16,7 +16,7 @@ jobs:
       - name: Parse PowerShell scripts
         shell: pwsh
         run: |
-          $files = 'install.ps1', 'config/Microsoft.PowerShell_profile.ps1'
+          $files = 'install.ps1', 'add-admin-ssh-key.ps1', 'config/Microsoft.PowerShell_profile.ps1'
           $failed = $false
           foreach ($f in $files) {
             $errs = $null
