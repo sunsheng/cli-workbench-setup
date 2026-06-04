@@ -355,8 +355,8 @@ GitHub Actions 会执行：
 
 1. Windows lint：解析 `install-windows.ps1`、`add-windows-admin-ssh-key.ps1` 和 PowerShell profile，并运行 PSScriptAnalyzer。
 2. Ubuntu lint：对 `install-ubuntu.sh` 和配置运行 `bash -n`、`zsh -n` 和 ShellCheck。
-3. Windows install：在 `windows-latest` 上执行 `.\install-windows.ps1 -NoSsh` 并验证工具、Node.js、AI CLI、profile 和 git 快捷方式。
-4. Ubuntu install：在 `ubuntu-latest` 上以 root 执行 `install-ubuntu.sh --no-ssh`，验证自动建用户、sudo、密码、SSH 文件权限、CLI、Node.js、AI CLI、默认 zsh、shell 配置、fzf 绑定和 git 快捷方式。
+3. Windows install：在 `windows-latest` 上执行 `.\install-windows.ps1 -NoSsh`，验证工具、Node.js、AI CLI 在 PATH 上且 `--version` 可执行，并验证 profile 和 git 快捷方式。
+4. Ubuntu install：在 `ubuntu-latest` 上从 `/root` 以 root 执行 `install-ubuntu.sh --no-ssh`，验证自动建用户、sudo、密码、SSH 文件权限、CLI、Node.js、AI CLI 在 PATH 上且 `--version` 可执行、默认 zsh、shell 配置、fzf 绑定和 git 快捷方式。
 
 ## 备注
 

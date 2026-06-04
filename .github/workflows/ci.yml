@@ -86,6 +86,7 @@ jobs:
             "$env:USERPROFILE\scoop\shims",
             "$env:LOCALAPPDATA\Programs\OpenAI\Codex\bin",
             "$env:USERPROFILE\.local\bin",
+            "$env:APPDATA\npm",
             $npmPrefix
           ) | Where-Object { $_ -and (Test-Path $_) }
           $env:Path = (($extraPaths + @($env:Path)) -join ';')
@@ -96,6 +97,11 @@ jobs:
             else { Write-Host "::error::missing tool: $t"; $missing += $t }
           }
           if ($missing) { exit 1 }
+          foreach ($t in 'node', 'npm', 'npx', 'codex', 'claude') {
+            Write-Host "Checking $t --version"
+            & $t --version
+            if ($LASTEXITCODE -ne 0) { Write-Host "::error::$t --version failed"; exit 1 }
+          }
 
       - name: Verify the profile loads cleanly
         shell: pwsh
@@ -124,7 +130,12 @@ jobs:
           # the runner's sshd. `env -u SUDO_USER` mimics a direct root login.
           # No CLI_PASSWORD: exercise the random-password path. The verify step
           # only asserts a password got set (passwd -S status P), not its value.
-          sudo env -u SUDO_USER CLI_USER=ciuser bash ./install-ubuntu.sh --no-ssh
+          # Start from /root so user-scoped installer commands cannot accidentally
+          # depend on inheriting a cwd that the target user can read.
+          sudo env -u SUDO_USER CLI_USER=ciuser GITHUB_WORKSPACE="$GITHUB_WORKSPACE" bash -lc '
+            cd /root
+            bash "$GITHUB_WORKSPACE/install-ubuntu.sh" --no-ssh
+          '
 
       - name: Verify user, group, and passwordless sudo
         shell: bash
@@ -174,6 +185,9 @@ jobs:
             rc=0
             for tool in git gh rg fd bat fzf jq 7z eza vim zoxide node npm npx codex claude; do
               if command -v "$tool" >/dev/null 2>&1; then echo "OK: $tool"; else echo "::error::missing for ciuser: $tool"; rc=1; fi
+            done
+            for tool in node npm npx codex claude; do
+              if "$tool" --version >/dev/null 2>&1; then echo "OK: $tool --version"; else echo "::error::failed for ciuser: $tool --version"; rc=1; fi
             done
             exit $rc
           '

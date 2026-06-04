@@ -52,7 +52,7 @@ NODE_MAJOR=22 bash ./install-ubuntu.sh   # pin Node major version
 .\add-windows-admin-ssh-key.ps1 -PublicKeyPath $HOME\.ssh\id_ed25519.pub  # admin session
 ```
 
-CI (`ubuntu-latest` + `windows-latest`) runs the installer with `--no-ssh` / `-NoSsh`, then asserts every CLI is on `PATH` and that the profile defines the `ll` / git-shortcut functions. If you add a tool or a profile function, add it to the verify lists in `ci.yml`.
+CI (`ubuntu-latest` + `windows-latest`) runs the installer with `--no-ssh` / `-NoSsh`, then asserts every CLI is on `PATH`, key CLIs can execute `--version`, and the profile defines the `ll` / git-shortcut functions. Ubuntu CI starts the root installer from `/root` so user-scoped commands cannot rely on inheriting a target-user-readable cwd. If you add a tool or a profile function, add it to the verify lists in `ci.yml`.
 
 ## Conventions that span files
 

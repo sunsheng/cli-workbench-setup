@@ -128,9 +128,10 @@ if [[ -n "$SCRIPT_SOURCE" ]]; then
 fi
 
 # The script always runs as root; runuser (util-linux, always present) drops to
-# the target user with the right HOME/PATH for user-scoped installs.
+# the target user with the right HOME/PATH/cwd for user-scoped installs. Start
+# in TARGET_HOME so commands never inherit root-only directories such as /root.
 run_target_user() {
-    runuser -u "$TARGET_USER" -- env HOME="$TARGET_HOME" PATH="$USER_BIN:$PATH" "$@"
+    ( cd "$TARGET_HOME" && runuser -u "$TARGET_USER" -- env HOME="$TARGET_HOME" PATH="$USER_BIN:$PATH" "$@" )
 }
 
 # Create (or reuse) the unprivileged CLI_USER and prepare it as the install

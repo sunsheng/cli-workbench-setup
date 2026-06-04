@@ -30,6 +30,12 @@ param(
 $ErrorActionPreference = 'Stop'
 $NodeMajor = 24
 
+try {
+    [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+} catch {
+    # PowerShell 7+ does not depend on ServicePointManager for modern TLS.
+}
+
 function Write-Step($msg) { Write-Host "==> $msg" -ForegroundColor Cyan }
 function Write-Skip($msg) { Write-Host "    (skip) $msg" -ForegroundColor DarkGray }
 
@@ -127,6 +133,36 @@ function Get-NpmGlobalBinDir {
     }
 }
 
+function Invoke-InHome {
+    param(
+        [Parameter(Mandatory=$true)][scriptblock]$Script
+    )
+
+    $oldLocation = Get-Location
+    try {
+        Set-Location -LiteralPath $HOME
+        & $Script
+    } finally {
+        Set-Location -LiteralPath $oldLocation
+    }
+}
+
+function Test-CliCommand {
+    param(
+        [Parameter(Mandatory=$true)][string]$Name
+    )
+
+    $cmd = Get-Command $Name -ErrorAction SilentlyContinue
+    if (-not $cmd) { return $false }
+
+    try {
+        & $cmd.Source --version *> $null
+        return $LASTEXITCODE -eq 0
+    } catch {
+        return $false
+    }
+}
+
 function Get-PwshCommand {
     Get-Command pwsh -ErrorAction SilentlyContinue
 }
@@ -197,29 +233,44 @@ function Update-AiCliPath {
     $paths = @(
         (Join-Path $env:LOCALAPPDATA 'Programs\OpenAI\Codex\bin'),
         (Join-Path $HOME '.local\bin'),
-        (Get-NpmGlobalBinDir)
+        (Get-NpmGlobalBinDir),
+        $(if ($env:APPDATA) { Join-Path $env:APPDATA 'npm' })
     )
     foreach ($path in $paths) {
         Add-PathEntry -PathEntry $path -Persist
     }
 }
 
+function Install-NpmGlobalPackage {
+    param(
+        [Parameter(Mandatory=$true)][string]$Package
+    )
+
+    if (-not (Get-Command npm -ErrorAction SilentlyContinue)) {
+        throw "npm is required to install $Package."
+    }
+    Invoke-InHome { npm install -g $Package }
+    Update-AiCliPath
+}
+
 function Install-CodexCli {
     Write-Step "Ensuring Codex CLI..."
     Update-AiCliPath
-    if (Get-Command codex -ErrorAction SilentlyContinue) {
+    if (Test-CliCommand codex) {
         Write-Skip "codex already installed."
         return
     }
 
     $oldNonInteractive = $env:CODEX_NON_INTERACTIVE
     try {
-        $env:CODEX_NON_INTERACTIVE = '1'
+        if ([Console]::IsInputRedirected -or [Console]::IsOutputRedirected) {
+            $env:CODEX_NON_INTERACTIVE = '1'
+        }
         $installer = Invoke-RestMethod -Uri 'https://chatgpt.com/codex/install.ps1'
-        & ([scriptblock]::Create($installer))
+        Invoke-InHome { & ([scriptblock]::Create($installer)) }
     } catch {
         Write-Warning "Codex official installer failed; falling back to npm: $($_.Exception.Message)"
-        npm install -g @openai/codex
+        Install-NpmGlobalPackage '@openai/codex'
     } finally {
         if ($null -eq $oldNonInteractive) {
             Remove-Item Env:\CODEX_NON_INTERACTIVE -ErrorAction SilentlyContinue
@@ -229,13 +280,12 @@ function Install-CodexCli {
     }
 
     Update-AiCliPath
-    if (-not (Get-Command codex -ErrorAction SilentlyContinue)) {
+    if (-not (Test-CliCommand codex)) {
         Write-Step "Codex command still not found after official installer; falling back to npm..."
-        npm install -g @openai/codex
-        Update-AiCliPath
+        Install-NpmGlobalPackage '@openai/codex'
     }
-    if (-not (Get-Command codex -ErrorAction SilentlyContinue)) {
-        throw "codex was not found after installation."
+    if (-not (Test-CliCommand codex)) {
+        throw "codex was not usable after installation."
     }
 }
 
@@ -297,18 +347,17 @@ function Install-ClaudeCodeCli {
     if (-not (Install-ClaudeNative)) {
         try {
             $installer = Invoke-RestMethod -Uri 'https://claude.ai/install.ps1'
-            & ([scriptblock]::Create($installer))
+            Invoke-InHome { & ([scriptblock]::Create($installer)) }
         } catch {
             Write-Warning "Claude Code official installer failed; falling back to npm: $($_.Exception.Message)"
-            npm install -g @anthropic-ai/claude-code
+            Install-NpmGlobalPackage '@anthropic-ai/claude-code'
         }
     }
 
     Update-AiCliPath
     if (-not (Get-Command claude -ErrorAction SilentlyContinue)) {
         Write-Step "Claude command still not found after installers; falling back to npm..."
-        npm install -g @anthropic-ai/claude-code
-        Update-AiCliPath
+        Install-NpmGlobalPackage '@anthropic-ai/claude-code'
     }
     if (-not (Get-Command claude -ErrorAction SilentlyContinue)) {
         throw "claude was not found after installation."
@@ -317,11 +366,15 @@ function Install-ClaudeCodeCli {
 
 # --- 1. Install Scoop -------------------------------------------------------
 Write-Step "Checking Scoop..."
+try {
+    Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser -Force
+} catch {
+    Write-Warning "Could not set CurrentUser execution policy to RemoteSigned: $($_.Exception.Message)"
+}
 if (Get-Command scoop -ErrorAction SilentlyContinue) {
     Write-Skip "Scoop already installed."
 } else {
     Write-Step "Installing Scoop..."
-    Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser -Force
     $installer = Join-Path $env:TEMP 'scoop-install.ps1'
     Invoke-RestMethod -Uri https://get.scoop.sh -OutFile $installer
     # -RunAsAdmin lets the installer proceed when running in an elevated shell.
@@ -333,6 +386,7 @@ if (Get-Command scoop -ErrorAction SilentlyContinue) {
     # Make scoop available in the current session.
     $env:Path = "$env:USERPROFILE\scoop\shims;$env:Path"
 }
+Add-PathEntry -PathEntry "$env:USERPROFILE\scoop\shims" -Persist
 
 # --- 2. Ensure PowerShell 7 -------------------------------------------------
 Install-PowerShell7
