@@ -4,6 +4,7 @@ set -Eeuo pipefail
 NO_PROFILE=0
 NO_SSH=0
 NODE_MAJOR="${NODE_MAJOR:-24}"
+CLI_USER="${CLI_USER:-dev}"   # user to create+install for when run as root
 REPO_RAW_BASE="https://raw.githubusercontent.com/sunsheng/windows-cli-setup/main"
 SSH_PORTS=(58888)   # listen on 58888 only; port 22 dropped to dodge SSH brute-force
 APT_UPDATED=0
@@ -14,6 +15,10 @@ Usage: bash ./install-ubuntu.sh [--no-profile] [--no-ssh]
 
 One-shot setup for a modern Ubuntu Server command-line environment.
 
+Run as a normal sudo user to set up that user. Run as root and it will instead
+create an unprivileged user (claude refuses to run as root), give it passwordless
+sudo, and install everything for that user.
+
 Options:
   --no-profile   Install tools only; do not change bash/vim config.
   --no-ssh       Skip OpenSSH Server installation and configuration.
@@ -22,6 +27,8 @@ Options:
 Environment:
   NODE_MAJOR     Node.js major version to install when node is missing or old.
                  Defaults to 24.
+  CLI_USER       When run as root, the unprivileged user to create and install
+                 for. Defaults to dev.
 EOF
 }
 
@@ -65,8 +72,8 @@ else
     command_exists sudo || die "sudo is required when not running as root."
     # Pre-warm sudo credentials for interactive use, but skip when sudo is already
     # passwordless: `sudo -v` can still demand a password for a NOPASSWD user and
-    # would then fail in a non-interactive session with no tty (e.g. when
-    # create-user-ubuntu.sh runs this as a freshly created NOPASSWD user).
+    # would then fail in a non-interactive session with no tty (e.g. the root
+    # bootstrap below re-runs this as a freshly created NOPASSWD user).
     if ! sudo -n true 2>/dev/null; then
         sudo -v
     fi
@@ -114,6 +121,82 @@ run_target_user() {
     else
         env HOME="$TARGET_HOME" PATH="$USER_BIN:$PATH" "$@"
     fi
+}
+
+# When run as root with no non-root invoker, install for a normal user instead of
+# root: `claude --dangerously-skip-permissions` refuses to run as root. Create (or
+# reuse) CLI_USER with passwordless sudo, then re-run this whole installer as them
+# and exit. Forces --no-ssh: this typically runs over a remote root session, and
+# flipping sshd to 58888/key-only here could lock you out — harden SSH later as
+# that user. No-op (returns) when already a normal user.
+maybe_bootstrap_user() {
+    [[ "$(id -u)" -eq 0 ]] || return 0
+    [[ -z "${SUDO_USER:-}" || "$SUDO_USER" == "root" ]] || return 0
+
+    [[ "$CLI_USER" =~ ^[a-z_][a-z0-9_-]*$ ]] ||
+        die "Invalid CLI_USER '$CLI_USER' (use lowercase letters, digits, '-' or '_')."
+
+    step "Running as root: setting up unprivileged user '$CLI_USER' (claude cannot run as root)..."
+    if id "$CLI_USER" >/dev/null 2>&1; then
+        skip "User '$CLI_USER' already exists."
+    else
+        adduser --disabled-password --gecos "" "$CLI_USER"
+    fi
+    usermod -aG sudo "$CLI_USER"
+
+    # sudo ignores drop-in files whose names contain '.'; the username regex
+    # forbids dots, so "90-<user>-nopasswd" is always a valid filename.
+    local sudoers="/etc/sudoers.d/90-$CLI_USER-nopasswd" tmp
+    tmp="$(mktemp)"
+    printf '%s ALL=(ALL) NOPASSWD:ALL\n' "$CLI_USER" > "$tmp"
+    visudo -cf "$tmp" >/dev/null || { rm -f "$tmp"; die "sudoers syntax check failed."; }
+    install -m 0440 -o root -g root "$tmp" "$sudoers"
+    rm -f "$tmp"
+    visudo -cf "$sudoers" >/dev/null || die "visudo check failed for $sudoers."
+
+    local home
+    home="$(getent passwd "$CLI_USER" | cut -d: -f6)"
+    [[ -n "$home" && -d "$home" ]] || die "Cannot resolve home directory for '$CLI_USER'."
+
+    # Get a copy of this installer the new user can read (a clone may live in
+    # /root, mode 0700, which they cannot traverse) and feed it via stdin, so the
+    # new user needs no access to the path.
+    local self="" fetched=0
+    if [[ -n "$SCRIPT_DIR" && -f "$SCRIPT_DIR/install-ubuntu.sh" ]]; then
+        self="$SCRIPT_DIR/install-ubuntu.sh"
+    else
+        command_exists curl || die "curl is required to fetch install-ubuntu.sh."
+        self="$(mktemp)"
+        fetched=1
+        curl -fsSL "$REPO_RAW_BASE/install-ubuntu.sh" -o "$self"
+    fi
+
+    local args=(--no-ssh)
+    if ((NO_PROFILE)); then
+        args+=(--no-profile)
+    fi
+
+    local rc=0
+    if command_exists runuser; then
+        runuser -u "$CLI_USER" -- env -u SUDO_USER HOME="$home" NODE_MAJOR="$NODE_MAJOR" \
+            bash -s -- "${args[@]}" < "$self" || rc=$?
+    else
+        # SC2024: the redirect is intentionally opened by our (root) shell, not
+        # the dropped-privilege user — that is the point.
+        # shellcheck disable=SC2024
+        sudo -u "$CLI_USER" -H env -u SUDO_USER NODE_MAJOR="$NODE_MAJOR" \
+            bash -s -- "${args[@]}" < "$self" || rc=$?
+    fi
+    if ((fetched)); then
+        rm -f "$self"
+    fi
+    ((rc == 0)) || die "Install for '$CLI_USER' failed (exit $rc)."
+
+    printf '\n'
+    step "Done! User '$CLI_USER' has passwordless sudo, and claude / codex are installed."
+    printf '  Switch to it:  sudo -iu %s\n' "$CLI_USER"
+    printf '  Then run:      claude --dangerously-skip-permissions\n'
+    exit 0
 }
 
 apt_update_once() {
@@ -598,6 +681,7 @@ configure_ssh() {
     restart_ssh_service
 }
 
+maybe_bootstrap_user
 configure_locale
 install_tools
 install_profile
