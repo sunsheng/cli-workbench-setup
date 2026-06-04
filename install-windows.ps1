@@ -87,17 +87,6 @@ function Add-SshdGlobalLines($path, [string[]]$lines) {
     return $true
 }
 
-function Get-NodeMajor {
-    if (-not (Get-Command node -ErrorAction SilentlyContinue)) { return $null }
-    try {
-        $major = & node -p "process.versions.node.split('.')[0]" 2>$null
-        if ($major -match '^\d+$') { return [int]$major }
-    } catch {
-        return $null
-    }
-    return $null
-}
-
 function Add-PathEntry {
     param(
         [Parameter(Mandatory=$true)][string]$PathEntry,
@@ -398,16 +387,10 @@ foreach ($t in $tools) {
 }
 
 # --- 6. Ensure Node.js LTS --------------------------------------------------
-# Skip when a sufficiently new node/npm/npx toolchain is already available
-# outside Scoop, to avoid installing a second copy on developer machines.
+# Skip when node is already present; otherwise install the Scoop LTS package.
 Write-Step "Ensuring Node.js $NodeMajor.x LTS..."
-$nodeMajorNow = Get-NodeMajor
-$hasNodeToolchain = $nodeMajorNow -and
-                    ($nodeMajorNow -ge $NodeMajor) -and
-                    (Get-Command npm -ErrorAction SilentlyContinue) -and
-                    (Get-Command npx -ErrorAction SilentlyContinue)
-if ($hasNodeToolchain) {
-    Write-Skip "node $(node --version), npm, and npx already available."
+if (Get-Command node -ErrorAction SilentlyContinue) {
+    Write-Skip "node $(node --version) already available."
 } else {
     scoop install nodejs-lts
 }
@@ -512,7 +495,7 @@ if ($NoSsh) {
 
     # 4. Ensure an inbound firewall rule for each SSH port.
     foreach ($port in $SshPorts) {
-        $ruleName = if ($port -eq 22) { 'OpenSSH-Server-In-TCP' } else { "OpenSSH-Server-In-TCP-$port" }
+        $ruleName = "OpenSSH-Server-In-TCP-$port"
         if (Get-NetFirewallRule -Name $ruleName -ErrorAction SilentlyContinue) {
             Write-Skip "Firewall rule '$ruleName' already present."
         } else {
