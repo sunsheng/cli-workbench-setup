@@ -4,8 +4,8 @@
     One-shot setup for a modern Windows command-line environment.
 
 .DESCRIPTION
-    Installs the Scoop package manager, a set of common CLI tools, Node.js LTS,
-    and the
+    Installs the Scoop package manager, PowerShell 7, a set of common CLI tools,
+    Node.js LTS, and the
     PSFzf module, then installs the bundled PowerShell profile that wires up
     aliases (eza/bat) and keybindings (fzf Ctrl+R / Ctrl+T) and zoxide.
 
@@ -136,6 +136,72 @@ function Get-NpmGlobalBinDir {
     } catch {
         return $null
     }
+}
+
+function Get-PwshCommand {
+    Get-Command pwsh -ErrorAction SilentlyContinue
+}
+
+function Get-ScoopPackageExe {
+    param(
+        [Parameter(Mandatory=$true)][string]$Package,
+        [Parameter(Mandatory=$true)][string]$ExeName
+    )
+
+    if (-not (Get-Command scoop -ErrorAction SilentlyContinue)) { return $null }
+    try {
+        $prefix = (& scoop prefix $Package 2>$null | Select-Object -First 1).Trim()
+        if ([string]::IsNullOrWhiteSpace($prefix)) { return $null }
+        $exe = Join-Path $prefix $ExeName
+        if (Test-Path $exe) { return $exe }
+    } catch {
+        return $null
+    }
+    return $null
+}
+
+function Get-PwshExePath {
+    $candidates = @(
+        'C:\Program Files\PowerShell\7\pwsh.exe',
+        (Get-ScoopPackageExe -Package 'pwsh' -ExeName 'pwsh.exe'),
+        "$env:USERPROFILE\scoop\shims\pwsh.exe",
+        "$env:LOCALAPPDATA\Microsoft\WindowsApps\pwsh.exe"
+    )
+    foreach ($candidate in $candidates) {
+        if (-not [string]::IsNullOrWhiteSpace($candidate) -and (Test-Path $candidate)) {
+            return $candidate
+        }
+    }
+
+    $cmd = Get-PwshCommand
+    if ($cmd) { return $cmd.Source }
+    return $null
+}
+
+function Install-PowerShell7 {
+    Write-Step "Ensuring PowerShell 7 (pwsh)..."
+    if (Get-PwshCommand) {
+        Write-Skip "pwsh already installed."
+        return
+    }
+
+    scoop install pwsh
+    Add-PathEntry -PathEntry "$env:USERPROFILE\scoop\shims" -Persist
+    if (-not (Get-PwshCommand)) {
+        throw "pwsh was not found after installation."
+    }
+}
+
+function Install-PwshProfile {
+    param(
+        [Parameter(Mandatory=$true)][string]$SourcePath
+    )
+
+    $destinationPath = Join-Path $HOME 'Documents\PowerShell\Microsoft.PowerShell_profile.ps1'
+    $dir = Split-Path $destinationPath -Parent
+    New-Item -ItemType Directory -Force -Path $dir | Out-Null
+    Copy-Item $SourcePath $destinationPath -Force
+    Write-Host "    Profile installed to $destinationPath" -ForegroundColor Green
 }
 
 function Update-AiCliPath {
@@ -279,7 +345,10 @@ if (Get-Command scoop -ErrorAction SilentlyContinue) {
     $env:Path = "$env:USERPROFILE\scoop\shims;$env:Path"
 }
 
-# --- 2. Ensure git (Scoop needs it to add/clone buckets) --------------------
+# --- 2. Ensure PowerShell 7 -------------------------------------------------
+Install-PowerShell7
+
+# --- 3. Ensure git (Scoop needs it to add/clone buckets) --------------------
 # Must run *before* `scoop bucket add` below. git lives in the default `main`
 # bucket, which needs no git itself, so it's safe to install first.
 Write-Step "Ensuring git (required to add buckets)..."
@@ -289,7 +358,7 @@ if (Get-Command git -ErrorAction SilentlyContinue) {
     scoop install git
 }
 
-# --- 3. Add buckets ---------------------------------------------------------
+# --- 4. Add buckets ---------------------------------------------------------
 # Only `extras` is needed (CLI tools). Nerd Fonts are NOT installed here: icon
 # glyphs are rendered by the *client* terminal, not this (often headless/SSH)
 # machine, so the font belongs on the client. See README for client setup.
@@ -304,8 +373,8 @@ foreach ($b in $buckets) {
     }
 }
 
-# --- 4. Install CLI tools ---------------------------------------------------
-# (git is installed earlier in step 2, before buckets, so it's not repeated here.)
+# --- 5. Install CLI tools ---------------------------------------------------
+# (git is installed earlier in step 3, before buckets, so it's not repeated here.)
 $tools = @(
     'gh',        # gh  - GitHub CLI
     'ripgrep',   # rg  - fast recursive search
@@ -317,8 +386,7 @@ $tools = @(
     'eza',       # eza - modern ls / tree
     'vim',       # vim - text editor
     'zoxide'     # z   - smarter cd
-)   # NOTE: pwsh (PowerShell 7) is expected to be already installed; the SSH
-    #       step below just points the SSH default shell at it.
+)
 Write-Step "Installing CLI tools..."
 $installed = (scoop list 6>$null | Select-Object -ExpandProperty Name)
 foreach ($t in $tools) {
@@ -329,7 +397,7 @@ foreach ($t in $tools) {
     }
 }
 
-# --- 5. Ensure Node.js LTS --------------------------------------------------
+# --- 6. Ensure Node.js LTS --------------------------------------------------
 # Skip when a sufficiently new node/npm/npx toolchain is already available
 # outside Scoop, to avoid installing a second copy on developer machines.
 Write-Step "Ensuring Node.js $NodeMajor.x LTS..."
@@ -344,19 +412,23 @@ if ($hasNodeToolchain) {
     scoop install nodejs-lts
 }
 
-# --- 6. Install AI coding CLIs ----------------------------------------------
+# --- 7. Install AI coding CLIs ----------------------------------------------
 Install-CodexCli
 Install-ClaudeCodeCli
 
-# --- 7. Install PSFzf module (for Ctrl+R / Ctrl+T) --------------------------
+# --- 8. Install PSFzf module (for Ctrl+R / Ctrl+T) --------------------------
 Write-Step "Installing PSFzf module..."
-if (Get-Module PSFzf -ListAvailable) {
-    Write-Skip "PSFzf already installed."
+$pwshExe = Get-PwshExePath
+if ($pwshExe) {
+    & $pwshExe -NoLogo -NoProfile -ExecutionPolicy Bypass -Command @'
+$ErrorActionPreference = 'Stop'
+Install-Module -Name PSFzf -Scope CurrentUser -Force
+'@
 } else {
-    Install-Module -Name PSFzf -Scope CurrentUser -Force
+    throw "pwsh not found; cannot install PSFzf for PowerShell 7."
 }
 
-# --- 8. Install the PowerShell profile --------------------------------------
+# --- 9. Install the PowerShell profile --------------------------------------
 if ($NoProfile) {
     Write-Skip "Profile install skipped (-NoProfile)."
 } else {
@@ -365,19 +437,11 @@ if ($NoProfile) {
     if (-not $src) {
         # Warning already emitted by Resolve-ConfigFile.
     } else {
-        $dir = Split-Path $PROFILE -Parent
-        if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Force -Path $dir | Out-Null }
-        if (Test-Path $PROFILE) {
-            $backup = "$PROFILE.bak-$(Get-Date -Format yyyyMMdd-HHmmss)"
-            Copy-Item $PROFILE $backup
-            Write-Host "    Existing profile backed up to $backup" -ForegroundColor Yellow
-        }
-        Copy-Item $src $PROFILE -Force
-        Write-Host "    Profile installed to $PROFILE" -ForegroundColor Green
+        Install-PwshProfile -SourcePath $src
     }
 }
 
-# --- 9. Install the vim config (_vimrc) -------------------------------------
+# --- 10. Install the vim config (_vimrc) ------------------------------------
 if ($NoProfile) {
     Write-Skip "vim config install skipped (-NoProfile)."
 } else {
@@ -402,9 +466,9 @@ if ($NoProfile) {
 
 # Git aliases are no longer configured here: they ship as oh-my-zsh-style shell
 # shortcuts (gst / gco / gd / gp / ...) in the PowerShell profile installed in
-# step 8, so they load in every shell without touching your ~/.gitconfig.
+# step 9, so they load in every shell without touching your ~/.gitconfig.
 
-# --- 10. OpenSSH Server (requires an elevated/admin session) ----------------
+# --- 11. OpenSSH Server (requires an elevated/admin session) ----------------
 # Installs the Windows OpenSSH Server feature, enables sshd, listens on port
 # 58888 only (port 22 is left off to dodge internet-wide SSH brute-force),
 # disables password auth (key-only via administrators_authorized_keys),
@@ -459,16 +523,12 @@ if ($NoSsh) {
     }
 
     # 5. Point the SSH default shell at pwsh, matching what works on this box.
-    #    Resolution order (all stable across pwsh upgrades):
-    #      1) Program Files (MSI/winget) - present on CI runners
-    #      2) WindowsApps execution alias (Store/MSIX) - what this box uses
-    #      3) whatever `pwsh` is on PATH (last resort, version-stamped)
+    #    Resolution order:
+    #      1) Program Files (MSI/winget)
+    #      2) Scoop package directory installed above
+    #      3) Scoop shim / WindowsApps / PATH as fallbacks
     #    Also set DefaultShellCommandOption '-c' so `ssh host <cmd>` works.
-    $pwshPath = @(
-        'C:\Program Files\PowerShell\7\pwsh.exe'
-        "$env:LOCALAPPDATA\Microsoft\WindowsApps\pwsh.exe"
-    ) | Where-Object { Test-Path $_ } | Select-Object -First 1
-    if (-not $pwshPath) { $pwshPath = (Get-Command pwsh -ErrorAction SilentlyContinue).Source }
+    $pwshPath = Get-PwshExePath
     if ($pwshPath) {
         New-ItemProperty -Path 'HKLM:\SOFTWARE\OpenSSH' -Name DefaultShell `
             -Value $pwshPath -PropertyType String -Force | Out-Null
