@@ -29,6 +29,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $NodeMajor = 24
+$ScriptSelfPath = if ($PSCommandPath) { $PSCommandPath } else { $null }
 
 try {
     [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
@@ -229,6 +230,37 @@ function Install-PwshProfile {
     Write-Host "    Profile installed to $destinationPath" -ForegroundColor Green
 }
 
+function Restart-InPowerShell7IfNeeded {
+    if ($PSVersionTable.PSEdition -eq 'Core') { return }
+    if ($env:CLI_WORKBENCH_PWSH_REEXEC -eq '1') { return }
+
+    $pwsh = Get-PwshExePath
+    if (-not $pwsh) {
+        throw "pwsh was not found after installation."
+    }
+
+    Write-Step "Switching to PowerShell 7 (pwsh) for the remaining setup..."
+    $scriptArgs = @()
+    if ($NoProfile) { $scriptArgs += '-NoProfile' }
+    if ($NoSsh) { $scriptArgs += '-NoSsh' }
+
+    $env:CLI_WORKBENCH_PWSH_REEXEC = '1'
+    if (-not [string]::IsNullOrWhiteSpace($ScriptSelfPath) -and (Test-Path $ScriptSelfPath)) {
+        & $pwsh -NoLogo -NoProfile -ExecutionPolicy Bypass -File $ScriptSelfPath @scriptArgs
+    } else {
+        $tmp = Join-Path $env:TEMP ('cli-workbench-install-windows-' + [Guid]::NewGuid().ToString('N') + '.ps1')
+        try {
+            Invoke-RestMethod -Uri "$RepoRawBase/install-windows.ps1" -OutFile $tmp
+            & $pwsh -NoLogo -NoProfile -ExecutionPolicy Bypass -File $tmp @scriptArgs
+        } finally {
+            if (Test-Path $tmp) { Remove-Item $tmp -Force -ErrorAction SilentlyContinue }
+        }
+    }
+
+    $code = if ($null -eq $LASTEXITCODE) { 1 } else { $LASTEXITCODE }
+    exit $code
+}
+
 function Update-AiCliPath {
     $paths = @(
         (Join-Path $env:LOCALAPPDATA 'Programs\OpenAI\Codex\bin'),
@@ -413,6 +445,7 @@ Add-PathEntry -PathEntry "$env:USERPROFILE\scoop\shims" -Persist
 
 # --- 2. Ensure PowerShell 7 -------------------------------------------------
 Install-PowerShell7
+Restart-InPowerShell7IfNeeded
 
 # --- 3. Ensure git (Scoop needs it to add/clone buckets) --------------------
 # Must run *before* `scoop bucket add` below. git lives in the default `main`
