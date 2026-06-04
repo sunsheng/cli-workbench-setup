@@ -10,7 +10,7 @@ Two parallel one-shot installers that provision the *same* modern CLI environmen
 - `add-windows-admin-ssh-key.ps1` — Windows helper that appends a public key to `%ProgramData%\ssh\administrators_authorized_keys` and fixes its ACL.
 - `install-ubuntu.sh` — Ubuntu Server, via `apt`.
 
-They are deliberate mirrors: the same tool set (git, gh, ripgrep, fd, bat, fzf, jq, 7zip, eza, vim, zoxide, Node.js LTS, Codex CLI, Claude Code CLI), the same idempotent step structure, the same AI-CLI install strategy, and the same SSH hardening posture. Windows additionally installs **PowerShell 7 (pwsh)** + the **PSFzf** module and points its SSH default shell at pwsh; Ubuntu installs **zsh** as the default login shell. **When you change behavior on one side, check whether the other side needs the mirror change** (and update `README.md`, which documents both). `profiles/` holds the shipped shell and Vim profiles consumed by both (`ubuntu-zprofile`, `ubuntu-zshrc`, `ubuntu-bashrc`, `powershell-profile.ps1`, `ubuntu-vimrc`, `windows-vimrc`).
+They are deliberate mirrors: the same tool set (git, gh, ripgrep, fd, bat, fzf, jq, 7zip, eza, vim, zoxide, Node.js LTS, Codex CLI, Claude Code CLI), the same idempotent step structure, the same AI-CLI install strategy, and a parallel SSH hardening posture (they diverge on password auth — see below). Windows additionally installs **PowerShell 7 (pwsh)** + the **PSFzf** module and points its SSH default shell at pwsh; Ubuntu installs **zsh** as the default login shell. **When you change behavior on one side, check whether the other side needs the mirror change** (and update `README.md`, which documents both). `profiles/` holds the shipped shell and Vim profiles consumed by both (`ubuntu-zprofile`, `ubuntu-zshrc`, `ubuntu-bashrc`, `powershell-profile.ps1`, `ubuntu-vimrc`, `windows-vimrc`).
 
 `README.md` is the user-facing doc and is written in Chinese — keep it in sync with any behavior change.
 
@@ -66,7 +66,7 @@ CI (`ubuntu-latest` + `windows-latest`) runs the installer with `--no-ssh` / `-N
 3. `npm install -g`.
 The native-first ordering is not arbitrary: `claude.ai/install.*` sits behind a Cloudflare managed challenge that **403s bare requests from datacenter/cloud IPs**, while `downloads.claude.ai` does not. Preserve this ordering and the checksum verification if you touch the installer.
 
-**SSH hardening posture (both OSes).** Listen on port **58888 only** (22 intentionally dropped to dodge internet-wide brute force), **key-only auth** (`PasswordAuthentication no`), and a login-group allowlist. Ubuntu writes `/etc/ssh/sshd_config.d/99-cli-setup.conf` and neutralizes any earlier drop-in (e.g. cloud-init's `50-*.conf`) that re-enables password auth — sshd honors the *first* match, and `50-` sorts before `99-`. Windows inserts global directives *before* the first `Match` block (a global line after a `Match` is scoped to it) and writes the file BOM-free (a BOM breaks sshd parsing).
+**SSH hardening posture.** Both listen on port **58888 only** (22 intentionally dropped to dodge internet-wide brute force), restrict logins to a group allowlist, and **disable direct root login**. **Password auth differs by OS:** Windows is **key-only** (`PasswordAuthentication no`); **Ubuntu allows password login** (`PasswordAuthentication yes`) in addition to keys. Ubuntu writes `/etc/ssh/sshd_config.d/99-cli-setup.conf` (`Port`, `AllowGroups sudo ssh-users`, `PermitRootLogin no`, `PasswordAuthentication yes`) and comments out any conflicting `PasswordAuthentication`/`PermitRootLogin` in earlier drop-ins (e.g. cloud-init's `50-*.conf`) so its values win — sshd honors the *first* match, and `50-` sorts before `99-`. Windows inserts global directives *before* the first `Match` block (a global line after a `Match` is scoped to it) and writes the file BOM-free (a BOM breaks sshd parsing).
 
 ## Ubuntu privilege / target-user model
 
@@ -78,12 +78,12 @@ The native-first ordering is not arbitrary: `claude.ai/install.*` sits behind a 
 
 This matters because Claude Code refuses `--dangerously-skip-permissions` under root: the tooling is installed for a normal user on purpose. Debian ships `fd`/`bat` as `fdfind`/`batcat`; the script creates user-level `fd`/`bat` shims in `~/.local/bin`. `eza` is installed from apt (universe) on Ubuntu 24.04+ and from Scoop on Windows.
 
-`setup_target_user` (called first, before any install step) creates/reuses `CLI_USER`, gives it passwordless sudo, and crucially makes the box recoverable after SSH is hardened to 58888/key-only:
+`setup_target_user` (called first, before any install step) creates/reuses `CLI_USER`, gives it passwordless sudo, and sets up a login that works on both the console and SSH:
 
-- It sets a **console login password** via `chpasswd`, but **only when the account has none yet** (`passwd -S` status `!= P`) so a re-run never clobbers a password you changed. `CLI_PASSWORD` overrides it; when unset, `generate_password` makes a random ~20-char one (openssl, else `/dev/urandom`) and the final summary prints it once. This is what lets you log in on the **VNC / cloud serial console** — a console has no SSH key, so without a password a locked (`--disabled-password`) account is unreachable there.
-- It creates `~/.ssh` (0700) and an empty `~/.ssh/authorized_keys` (0600), owned by `CLI_USER`, ready for you to paste a public key to enable key-only SSH on 58888.
+- It sets a **login password** via `chpasswd` (used for the VNC/serial console *and* for SSH password login), but **only when the account has none yet** (`passwd -S` status `!= P`) so a re-run never clobbers a password you changed. `CLI_PASSWORD` overrides it; when unset, `generate_password` makes a random 8–10 char one (mixed-case letters + digits, no symbols or look-alike characters; openssl, else `/dev/urandom`). That password is printed in the final summary **and saved to `~/.cli-setup-password` (0600, owned by `CLI_USER`)** so it stays recoverable, not just printed once.
+- It creates `~/.ssh` (0700) and an empty `~/.ssh/authorized_keys` (0600), owned by `CLI_USER`, ready for a public key — optional now, since Ubuntu also allows password login.
 
-Because the console password is the recovery path, `configure_ssh` runs in the *same pass* (no forced `--no-ssh`): locking SSH to 58888/key-only with an empty `authorized_keys` is safe since you can still get in via the console to drop your key. The old `maybe_bootstrap_user` re-exec model (re-running the script over stdin as the new user, forcing `--no-ssh`) is gone.
+`configure_ssh` runs in the *same pass* (no forced `--no-ssh`): hardening SSH to 58888 with `PermitRootLogin no` while keeping password auth on is safe because the unprivileged user has a known password (saved on disk and printable), and the VNC/serial console remains as a fallback. The old `maybe_bootstrap_user` re-exec model (re-running the script over stdin as the new user, forcing `--no-ssh`) is gone.
 
 ## Shell profiles
 
