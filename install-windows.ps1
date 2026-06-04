@@ -126,7 +126,7 @@ function Get-NpmGlobalBinDir {
     try {
         $prefix = (& npm config get prefix 2>$null | Select-Object -First 1).Trim()
         if ([string]::IsNullOrWhiteSpace($prefix)) { return $null }
-        if ($IsWindows -or $env:OS -eq 'Windows_NT') { return $prefix }
+        if ($env:OS -eq 'Windows_NT') { return $prefix }
         return (Join-Path $prefix 'bin')
     } catch {
         return $null
@@ -253,6 +253,31 @@ function Install-NpmGlobalPackage {
     Update-AiCliPath
 }
 
+function Invoke-OfficialPowerShellInstaller {
+    param(
+        [Parameter(Mandatory=$true)][string]$Uri
+    )
+
+    $tmp = Join-Path $env:TEMP ('cli-workbench-installer-' + [Guid]::NewGuid().ToString('N') + '.ps1')
+    try {
+        Invoke-RestMethod -Uri $Uri -OutFile $tmp
+        $pwsh = Get-PwshExePath
+        Invoke-InHome {
+            if ($pwsh) {
+                & $pwsh -NoLogo -NoProfile -ExecutionPolicy Bypass -File $tmp
+                if ($LASTEXITCODE -ne 0) {
+                    throw "$Uri exited with code $LASTEXITCODE."
+                }
+            } else {
+                $installer = Get-Content -LiteralPath $tmp -Raw
+                & ([scriptblock]::Create($installer))
+            }
+        }
+    } finally {
+        if (Test-Path $tmp) { Remove-Item $tmp -Force -ErrorAction SilentlyContinue }
+    }
+}
+
 function Install-CodexCli {
     Write-Step "Ensuring Codex CLI..."
     Update-AiCliPath
@@ -266,8 +291,7 @@ function Install-CodexCli {
         if ([Console]::IsInputRedirected -or [Console]::IsOutputRedirected) {
             $env:CODEX_NON_INTERACTIVE = '1'
         }
-        $installer = Invoke-RestMethod -Uri 'https://chatgpt.com/codex/install.ps1'
-        Invoke-InHome { & ([scriptblock]::Create($installer)) }
+        Invoke-OfficialPowerShellInstaller -Uri 'https://chatgpt.com/codex/install.ps1'
     } catch {
         Write-Warning "Codex official installer failed; falling back to npm: $($_.Exception.Message)"
         Install-NpmGlobalPackage '@openai/codex'
@@ -346,8 +370,7 @@ function Install-ClaudeCodeCli {
     # IPs). Fallback 1: claude.ai/install.ps1. Fallback 2: npm.
     if (-not (Install-ClaudeNative)) {
         try {
-            $installer = Invoke-RestMethod -Uri 'https://claude.ai/install.ps1'
-            Invoke-InHome { & ([scriptblock]::Create($installer)) }
+            Invoke-OfficialPowerShellInstaller -Uri 'https://claude.ai/install.ps1'
         } catch {
             Write-Warning "Claude Code official installer failed; falling back to npm: $($_.Exception.Message)"
             Install-NpmGlobalPackage '@anthropic-ai/claude-code'
