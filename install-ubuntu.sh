@@ -6,7 +6,7 @@ NO_SSH=0
 NODE_MAJOR="${NODE_MAJOR:-24}"
 CLI_USER="${CLI_USER:-dev}"           # unprivileged user to create + install for
 CLI_PASSWORD="${CLI_PASSWORD:-}"      # console login password; empty => auto-generate
-REPO_RAW_BASE="https://raw.githubusercontent.com/sunsheng/windows-cli-setup/main"
+REPO_RAW_BASE="https://raw.githubusercontent.com/sunsheng/cli-workbench-setup/main"
 SSH_PORTS=(58888)   # listen on 58888 only; port 22 dropped to dodge SSH brute-force
 APT_UPDATED=0
 PASSWORD_SET=0        # set to 1 by setup_target_user when it assigns a password
@@ -24,7 +24,7 @@ a console login password, prepares an empty ~/.ssh/authorized_keys, and installs
 the whole environment for that user. There is no self-bootstrap / re-exec.
 
 Options:
-  --no-profile   Install tools only; do not change bash/vim config.
+  --no-profile   Install tools only; do not change bash/Vim profiles.
   --no-ssh       Skip OpenSSH Server installation and configuration.
   -h, --help     Show this help.
 
@@ -112,7 +112,7 @@ if [[ -n "$SCRIPT_SOURCE" ]]; then
     else
         SCRIPT_DIR=""
     fi
-    if [[ ! -f "$SCRIPT_DIR/config/bashrc" ]]; then
+    if [[ ! -f "$SCRIPT_DIR/profiles/ubuntu-bashrc" ]]; then
         SCRIPT_DIR=""
     fi
 fi
@@ -228,7 +228,7 @@ apt_has_package() {
     apt-cache show "$1" >/dev/null 2>&1
 }
 
-resolve_config_file() {
+resolve_profile_file() {
     local relative_path="$1"
     local local_path=""
     if [[ -n "$SCRIPT_DIR" ]]; then
@@ -239,7 +239,7 @@ resolve_config_file() {
         fi
     fi
 
-    command_exists curl || die "curl is required to fetch bundled config."
+    command_exists curl || die "curl is required to fetch bundled profile."
     local tmp
     tmp="$(mktemp)"
     if curl -fsSL "$REPO_RAW_BASE/$relative_path" -o "$tmp"; then
@@ -599,17 +599,17 @@ install_profile() {
 
     step "Installing bash profile..."
     local bash_src
-    if ! bash_src="$(resolve_config_file "config/bashrc")"; then
-        warn "Could not obtain config/bashrc; skipping bash profile."
+    if ! bash_src="$(resolve_profile_file "profiles/ubuntu-bashrc")"; then
+        warn "Could not obtain profiles/ubuntu-bashrc; skipping bash profile."
     else
         install_user_file "$bash_src" "$TARGET_HOME/.bashrc.d/cli-setup.bash"
         ensure_bashrc_source
     fi
 
-    step "Installing vim config..."
+    step "Installing Vim profile..."
     local vim_src
-    if ! vim_src="$(resolve_config_file "config/vimrc")"; then
-        warn "Could not obtain config/vimrc; skipping vim config."
+    if ! vim_src="$(resolve_profile_file "profiles/ubuntu-vimrc")"; then
+        warn "Could not obtain profiles/ubuntu-vimrc; skipping vim config."
         return
     fi
     target_mkdir "$TARGET_HOME/.vim/undo"

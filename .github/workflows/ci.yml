@@ -16,7 +16,7 @@ jobs:
       - name: Parse PowerShell scripts
         shell: pwsh
         run: |
-          $files = 'install.ps1', 'add-admin-ssh-key.ps1', 'config/Microsoft.PowerShell_profile.ps1'
+          $files = 'install-windows.ps1', 'add-windows-admin-ssh-key.ps1', 'profiles/powershell-profile.ps1'
           $failed = $false
           foreach ($f in $files) {
             $errs = $null
@@ -55,7 +55,7 @@ jobs:
         run: |
           set -euo pipefail
           bash -n install-ubuntu.sh
-          bash -n config/bashrc
+          bash -n profiles/ubuntu-bashrc
 
       - name: ShellCheck
         shell: bash
@@ -63,7 +63,7 @@ jobs:
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install -y shellcheck
-          shellcheck -s bash install-ubuntu.sh config/bashrc
+          shellcheck -s bash install-ubuntu.sh profiles/ubuntu-bashrc
 
   windows-install:
     name: Windows install + verify
@@ -73,7 +73,7 @@ jobs:
 
       - name: Run installer (-NoSsh)
         shell: pwsh
-        run: .\install.ps1 -NoSsh
+        run: .\install-windows.ps1 -NoSsh
 
       - name: Verify CLI tools are on PATH
         shell: pwsh

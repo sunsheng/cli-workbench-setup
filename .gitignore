@@ -1,4 +1,4 @@
-# PowerShell profile backups created by install.ps1
+# PowerShell profile backups created by install-windows.ps1
 *.bak-*
 
 # OS / editor cruft

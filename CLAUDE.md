@@ -6,11 +6,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Two parallel one-shot installers that provision the *same* modern CLI environment on two OSes:
 
-- `install.ps1` — Windows Server / Windows, via [Scoop](https://scoop.sh).
-- `add-admin-ssh-key.ps1` — Windows helper that appends a public key to `%ProgramData%\ssh\administrators_authorized_keys` and fixes its ACL.
+- `install-windows.ps1` — Windows Server / Windows, via [Scoop](https://scoop.sh).
+- `add-windows-admin-ssh-key.ps1` — Windows helper that appends a public key to `%ProgramData%\ssh\administrators_authorized_keys` and fixes its ACL.
 - `install-ubuntu.sh` — Ubuntu Server, via `apt`.
 
-They are deliberate mirrors: the same tool set (git, gh, ripgrep, fd, bat, fzf, jq, 7zip, eza, vim, zoxide, Node.js LTS, Codex CLI, Claude Code CLI), the same idempotent step structure, the same AI-CLI install strategy, and the same SSH hardening posture. **When you change behavior on one side, check whether the other side needs the mirror change** (and update `README.md`, which documents both). `config/` holds the shipped dotfiles consumed by both.
+They are deliberate mirrors: the same tool set (git, gh, ripgrep, fd, bat, fzf, jq, 7zip, eza, vim, zoxide, Node.js LTS, Codex CLI, Claude Code CLI), the same idempotent step structure, the same AI-CLI install strategy, and the same SSH hardening posture. **When you change behavior on one side, check whether the other side needs the mirror change** (and update `README.md`, which documents both). `profiles/` holds the shipped shell and Vim profiles consumed by both.
 
 `README.md` is the user-facing doc and is written in Chinese — keep it in sync with any behavior change.
 
@@ -22,14 +22,15 @@ Lint (run before pushing):
 
 ```bash
 # Bash side
-bash -n install-ubuntu.sh config/bashrc
-shellcheck -s bash install-ubuntu.sh config/bashrc
+bash -n install-ubuntu.sh profiles/ubuntu-bashrc
+shellcheck -s bash install-ubuntu.sh profiles/ubuntu-bashrc
 ```
 
 ```powershell
 # PowerShell side: parse, then analyze (Error severity gates CI)
-[System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path install.ps1), [ref]$null, [ref]([ref]$null).Value)
-[System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path add-admin-ssh-key.ps1), [ref]$null, [ref]([ref]$null).Value)
+[System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path install-windows.ps1), [ref]$null, [ref]([ref]$null).Value)
+[System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path add-windows-admin-ssh-key.ps1), [ref]$null, [ref]([ref]$null).Value)
+[System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path profiles/powershell-profile.ps1), [ref]$null, [ref]([ref]$null).Value)
 Invoke-ScriptAnalyzer -Path . -Recurse -Severity Error
 ```
 
@@ -43,10 +44,10 @@ NODE_MAJOR=22 bash ./install-ubuntu.sh   # pin Node major version
 ```
 
 ```powershell
-.\install.ps1            # full run (SSH step auto-skips in a non-admin session)
-.\install.ps1 -NoProfile
-.\install.ps1 -NoSsh
-.\add-admin-ssh-key.ps1 -PublicKeyPath $HOME\.ssh\id_ed25519.pub  # admin session
+.\install-windows.ps1            # full run (SSH step auto-skips in a non-admin session)
+.\install-windows.ps1 -NoProfile
+.\install-windows.ps1 -NoSsh
+.\add-windows-admin-ssh-key.ps1 -PublicKeyPath $HOME\.ssh\id_ed25519.pub  # admin session
 ```
 
 CI (`ubuntu-latest` + `windows-latest`) runs the installer with `--no-ssh` / `-NoSsh`, then asserts every CLI is on `PATH` and that the profile defines the `ll` / git-shortcut functions. If you add a tool or a profile function, add it to the verify lists in `ci.yml`.
@@ -55,7 +56,7 @@ CI (`ubuntu-latest` + `windows-latest`) runs the installer with `--no-ssh` / `-N
 
 **Idempotency is mandatory.** Every step must detect an existing install/config and skip (`command_exists` / `Get-Command` guards, `skip`/`Write-Skip`). Re-running must be a no-op.
 
-**Config resolution: local-or-fetch.** Both installers can run from a clone *or* piped from `curl`/`iwr`. `resolve_config_file` (bash) / `Resolve-ConfigFile` (ps1) return the on-disk `config/<file>` when the script dir is known, otherwise download it from `REPO_RAW_BASE`/`$RepoRawBase` (the hardcoded `raw.githubusercontent.com/sunsheng/windows-cli-setup/main`). Keep that base URL correct if the repo moves.
+**Profile resolution: local-or-fetch.** Both installers can run from a clone *or* piped from `curl`/`iwr`. `resolve_profile_file` (bash) / `Resolve-ProfileFile` (ps1) return the on-disk `profiles/<file>` when the script dir is known, otherwise download it from `REPO_RAW_BASE`/`$RepoRawBase` (the hardcoded `raw.githubusercontent.com/sunsheng/cli-workbench-setup/main`). Keep that base URL correct if the repo moves.
 
 **AI CLI install is a deliberate 3-tier fallback** (`install_claude_code_cli` / `Install-ClaudeCodeCli`, and the Codex equivalents):
 1. Native binary pulled *directly* from `downloads.claude.ai` (resolve `latest` → download platform binary → verify SHA256 from `manifest.json` → run the binary's built-in `install`).
@@ -84,6 +85,6 @@ Because the console password is the recovery path, `configure_ssh` runs in the *
 
 ## Shell profiles
 
-Git shortcuts (`gst`, `gd`, `gdca`, `glog`, `glola`, `gsh`, …) are **shell functions/aliases shipped in the profile** (`config/bashrc`, `config/Microsoft.PowerShell_profile.ps1`) — they are intentionally *not* written to `~/.gitconfig`. The bash profile is installed to `~/.bashrc.d/cli-setup.bash` and sourced via an idempotent block appended to `~/.bashrc`. Existing target files are backed up to `*.bak-<timestamp>` before overwrite.
+Git shortcuts (`gst`, `gd`, `gdca`, `glog`, `glola`, `gsh`, …) are **shell functions/aliases shipped in the profile** (`profiles/ubuntu-bashrc`, `profiles/powershell-profile.ps1`) — they are intentionally *not* written to `~/.gitconfig`. The bash profile is installed to `~/.bashrc.d/cli-setup.bash` and sourced via an idempotent block appended to `~/.bashrc`. Existing target files are backed up to `*.bak-<timestamp>` before overwrite.
 
 Nerd Fonts are **never installed on the server** — icon glyphs are rendered by the *client* terminal, so fonts belong on the client (README documents client setup).

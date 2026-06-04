@@ -13,15 +13,15 @@
 
 .EXAMPLE
     # From a normal (non-admin) PowerShell session:
-    iwr -useb https://raw.githubusercontent.com/sunsheng/windows-cli-setup/main/install.ps1 | iex
+    iwr -useb https://raw.githubusercontent.com/sunsheng/cli-workbench-setup/main/install-windows.ps1 | iex
 
 .EXAMPLE
     # Or clone the repo and run locally:
-    .\install.ps1
+    .\install-windows.ps1
 #>
 [CmdletBinding()]
 param(
-    # Skip the personal config (PowerShell profile, _vimrc — git aliases live in the profile).
+    # Skip the personal profile files; git aliases live in the shell profile.
     [switch]$NoProfile,
     # Skip the OpenSSH Server step (it also requires an elevated session).
     [switch]$NoSsh
@@ -39,20 +39,20 @@ function Test-Admin {
         [Security.Principal.WindowsBuiltInRole]::Administrator)
 }
 
-# Base URL for fetching bundled config files when no local copy is available.
-$RepoRawBase = 'https://raw.githubusercontent.com/sunsheng/windows-cli-setup/main'
+# Base URL for fetching bundled profile files when no local copy is available.
+$RepoRawBase = 'https://raw.githubusercontent.com/sunsheng/cli-workbench-setup/main'
 
-# Resolve a bundled config file to a local path.
+# Resolve a bundled profile file to a local path.
 #   - Run from a clone (`$PSScriptRoot` set): use the file on disk.
 #   - Run via `iwr ... | iex` (`$PSScriptRoot` empty): download it from GitHub.
 # Returns $null (with a warning) if the file can't be obtained.
-function Resolve-ConfigFile($relativePath) {   # e.g. 'config/_vimrc'
+function Resolve-ProfileFile($relativePath) {   # e.g. 'profiles/windows-vimrc'
     if ($PSScriptRoot) {
         $local = Join-Path $PSScriptRoot ($relativePath -replace '/', '\')
         if (Test-Path $local) { return $local }
     }
     $url = "$RepoRawBase/$relativePath"
-    $tmp = Join-Path $env:TEMP ('wcs-' + (Split-Path $relativePath -Leaf))
+    $tmp = Join-Path $env:TEMP ('cli-workbench-' + (Split-Path $relativePath -Leaf))
     try {
         Write-Host "    Downloading $relativePath from GitHub..." -ForegroundColor DarkGray
         Invoke-RestMethod -Uri $url -OutFile $tmp
@@ -433,25 +433,25 @@ if ($NoProfile) {
     Write-Skip "Profile install skipped (-NoProfile)."
 } else {
     Write-Step "Installing PowerShell profile..."
-    $src = Resolve-ConfigFile 'config/Microsoft.PowerShell_profile.ps1'
+    $src = Resolve-ProfileFile 'profiles/powershell-profile.ps1'
     if (-not $src) {
-        # Warning already emitted by Resolve-ConfigFile.
+        # Warning already emitted by Resolve-ProfileFile.
     } else {
         Install-PwshProfile -SourcePath $src
     }
 }
 
-# --- 10. Install the vim config (_vimrc) ------------------------------------
+# --- 10. Install the Windows Vim profile ------------------------------------
 if ($NoProfile) {
-    Write-Skip "vim config install skipped (-NoProfile)."
+    Write-Skip "Vim profile install skipped (-NoProfile)."
 } else {
-    Write-Step "Installing vim config (_vimrc)..."
-    $vimSrc = Resolve-ConfigFile 'config/_vimrc'
+    Write-Step "Installing Windows Vim profile..."
+    $vimSrc = Resolve-ProfileFile 'profiles/windows-vimrc'
     $vimDst = Join-Path $HOME '_vimrc'
     if (-not $vimSrc) {
-        # Warning already emitted by Resolve-ConfigFile.
+        # Warning already emitted by Resolve-ProfileFile.
     } else {
-        # Persistent-undo dir referenced by the _vimrc (set undodir=...).
+        # Persistent-undo dir referenced by the Windows Vim profile.
         $undoDir = Join-Path $HOME 'vimfiles\undo'
         if (-not (Test-Path $undoDir)) { New-Item -ItemType Directory -Force -Path $undoDir | Out-Null }
         if (Test-Path $vimDst) {
@@ -460,7 +460,7 @@ if ($NoProfile) {
             Write-Host "    Existing _vimrc backed up to $backup" -ForegroundColor Yellow
         }
         Copy-Item $vimSrc $vimDst -Force
-        Write-Host "    _vimrc installed to $vimDst" -ForegroundColor Green
+        Write-Host "    Windows Vim profile installed to $vimDst" -ForegroundColor Green
     }
 }
 

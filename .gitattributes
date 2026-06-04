@@ -1,4 +1,4 @@
 *.sh text eol=lf
 *.yml text eol=lf
-config/bashrc text eol=lf
-config/vimrc text eol=lf
+profiles/ubuntu-bashrc text eol=lf
+profiles/ubuntu-vimrc text eol=lf

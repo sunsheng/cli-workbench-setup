@@ -11,10 +11,10 @@
     Must be run from an elevated PowerShell session.
 
 .EXAMPLE
-    .\add-admin-ssh-key.ps1 -PublicKeyPath $HOME\.ssh\id_ed25519.pub
+    .\add-windows-admin-ssh-key.ps1 -PublicKeyPath $HOME\.ssh\id_ed25519.pub
 
 .EXAMPLE
-    .\add-admin-ssh-key.ps1 -PublicKey 'ssh-ed25519 AAAA... user@host'
+    .\add-windows-admin-ssh-key.ps1 -PublicKey 'ssh-ed25519 AAAA... user@host'
 #>
 [CmdletBinding(DefaultParameterSetName = 'Path')]
 param(

@@ -33,7 +33,7 @@ function cat { bat @args }
 # (~130ms). Cache its output and dot-source the cache instead; regenerate only
 # when the cache is missing. After upgrading zoxide, delete the cache to refresh.
 # Guarded so the profile doesn't error where zoxide isn't installed (e.g. after
-# `install.ps1 -NoProfile`, or on a machine without the tools).
+# `install-windows.ps1 -NoProfile`, or on a machine without the tools).
 $zoxideCache = Join-Path (Split-Path $PROFILE) '.zoxide-init.ps1'
 if (-not (Test-Path $zoxideCache)) {
     if (Get-Command zoxide -ErrorAction SilentlyContinue) {
