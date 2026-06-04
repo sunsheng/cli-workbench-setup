@@ -11,6 +11,7 @@ SSH_PORTS=(58888)   # listen on 58888 only; port 22 dropped to dodge SSH brute-f
 APT_UPDATED=0
 PASSWORD_SET=0        # set to 1 by setup_target_user when it assigns a password
 PASSWORD_GENERATED=0  # set to 1 when that password was randomly generated
+PASSWORD_FILE=""      # path the assigned password is saved to (set when PASSWORD_SET=1)
 
 usage() {
     cat <<'EOF'
@@ -44,14 +45,18 @@ warn() { printf '\033[33mWARNING: %s\033[0m\n' "$*" >&2; }
 die() { printf '\033[31mERROR: %s\033[0m\n' "$*" >&2; exit 1; }
 command_exists() { command -v "$1" >/dev/null 2>&1; }
 
-# Print a ~20-char alphanumeric password. Prefers openssl; falls back to reading a
-# fixed chunk of /dev/urandom (read a finite amount up front so no stage in the
-# pipe is SIGPIPE'd, which would otherwise trip pipefail).
+# Print a random 8-10 char password: mixed-case letters + digits, no symbols and
+# no easily-confused characters (0/1 and O/o/I/l/i are excluded). Prefers
+# openssl, falls back to /dev/urandom. The source is kept small (well under the
+# pipe buffer) so the producer finishes before `cut` closes the pipe — otherwise
+# the SIGPIPE'd stage would trip `set -o pipefail`.
 generate_password() {
+    local charset='A-HJ-NP-Za-hj-km-np-z2-9'   # A-Z a-z 0-9 minus 0 1 O o I l i
+    local len=$((8 + RANDOM % 3))               # 8, 9, or 10
     if command_exists openssl; then
-        openssl rand -base64 24 | LC_ALL=C tr -dc 'A-Za-z0-9' | cut -c1-20
+        openssl rand -base64 48 | LC_ALL=C tr -dc "$charset" | cut -c1-"$len"
     else
-        head -c 400 /dev/urandom | LC_ALL=C tr -dc 'A-Za-z0-9' | cut -c1-20
+        head -c 600 /dev/urandom | LC_ALL=C tr -dc "$charset" | cut -c1-"$len"
     fi
 }
 
@@ -176,13 +181,21 @@ setup_target_user() {
         fi
         printf '%s:%s\n' "$CLI_USER" "$CLI_PASSWORD" | chpasswd
         PASSWORD_SET=1
-        printf '    Set console login password for %s (printed in the summary below).\n' "$CLI_USER"
+        # Persist the password under the user's home so it stays recoverable
+        # (not just printed once). Created with a 077 umask, then 0600 + owned
+        # by CLI_USER.
+        PASSWORD_FILE="$TARGET_HOME/.cli-setup-password"
+        ( umask 077; printf '%s\n' "$CLI_PASSWORD" > "$PASSWORD_FILE" )
+        chown "$CLI_USER:$TARGET_GROUP" "$PASSWORD_FILE"
+        chmod 0600 "$PASSWORD_FILE"
+        printf '    Set login password for %s and saved it to %s (mode 0600).\n' "$CLI_USER" "$PASSWORD_FILE"
     else
         skip "User '$CLI_USER' already has a login password."
     fi
 
     # Prepare an empty ~/.ssh/authorized_keys with correct ownership/permissions
-    # so you can paste a public key in to enable key-only SSH on 58888.
+    # so you can paste a public key in for key-based SSH (password login is also
+    # enabled, so this is optional).
     local ssh_dir="$TARGET_HOME/.ssh" auth_keys="$TARGET_HOME/.ssh/authorized_keys"
     install -d -m 0700 -o "$CLI_USER" -g "$TARGET_GROUP" "$ssh_dir"
     if [[ -e "$auth_keys" ]]; then
@@ -637,22 +650,25 @@ configure_ssh() {
             printf 'Port %s\n' "$port"
         done
         printf 'AllowGroups sudo ssh-users\n'
-        printf 'PasswordAuthentication no\n'
+        printf 'PermitRootLogin no\n'
+        printf 'PasswordAuthentication yes\n'
     } > "$tmp"
     install -m 0644 "$tmp" "$conf"
     rm -f "$tmp"
 
-    # Cloud images often ship /etc/ssh/sshd_config.d/50-cloud-init.conf with
-    # `PasswordAuthentication yes`. sshd honours the *first* match, and 50-
-    # sorts before our 99-, so the `no` above would be ignored. Comment out any
-    # active PasswordAuthentication yes in earlier drop-ins so key-only wins.
+    # sshd honours the *first* match for each keyword across the merged drop-ins,
+    # and 50-cloud-init sorts before our 99-. Comment out any active
+    # PasswordAuthentication / PermitRootLogin in earlier drop-ins so the values
+    # in our file take effect. (Already-commented lines start with '#', so the
+    # anchored patterns skip them, keeping this idempotent.)
     local dropin
     for dropin in /etc/ssh/sshd_config.d/*.conf; do
         [[ -e "$dropin" ]] || continue
         [[ "$dropin" == "$conf" ]] && continue
-        if grep -Eq '^[[:space:]]*PasswordAuthentication[[:space:]]+yes' "$dropin"; then
-            sed -ri 's/^([[:space:]]*PasswordAuthentication[[:space:]]+yes.*)$/# \1  # disabled by install-ubuntu.sh/' "$dropin"
-        fi
+        sed -ri \
+            -e 's/^([[:space:]]*PasswordAuthentication[[:space:]]+(yes|no).*)$/# \1  # overridden by install-ubuntu.sh/' \
+            -e 's/^([[:space:]]*PermitRootLogin[[:space:]]+[^[:space:]]+.*)$/# \1  # overridden by install-ubuntu.sh/' \
+            "$dropin"
     done
 
     if command_exists ufw; then
@@ -675,12 +691,12 @@ configure_ssh
 printf '\n'
 step "Done! Environment installed for user '$CLI_USER'."
 if [[ "$PASSWORD_SET" -eq 1 && "$PASSWORD_GENERATED" -eq 1 ]]; then
-    printf '  Console (VNC/serial) login:  %s / %s   <-- RANDOM, save it now (change: passwd)\n' "$CLI_USER" "$CLI_PASSWORD"
+    printf '  Login password:  %s / %s   <-- RANDOM, also saved to %s (change: passwd)\n' "$CLI_USER" "$CLI_PASSWORD" "$PASSWORD_FILE"
 elif [[ "$PASSWORD_SET" -eq 1 ]]; then
-    printf '  Console (VNC/serial) login:  %s / %s   (change it: passwd)\n' "$CLI_USER" "$CLI_PASSWORD"
+    printf '  Login password:  %s / %s   (saved to %s; change: passwd)\n' "$CLI_USER" "$CLI_PASSWORD" "$PASSWORD_FILE"
 else
-    printf '  Console (VNC/serial) login:  %s / <existing password unchanged>\n' "$CLI_USER"
+    printf '  Login password:  %s / <existing password unchanged>\n' "$CLI_USER"
 fi
-printf '  Enable SSH: add your public key to %s/.ssh/authorized_keys, then: ssh -p %s %s@<host>\n' \
-    "$TARGET_HOME" "${SSH_PORTS[0]}" "$CLI_USER"
+printf '  SSH (password or key) on port %s:  ssh -p %s %s@<host>\n' "${SSH_PORTS[0]}" "${SSH_PORTS[0]}" "$CLI_USER"
+printf '  (optional) add a key to %s/.ssh/authorized_keys for key-based login.\n' "$TARGET_HOME"
 printf '  Become the user:  sudo -iu %s   then run:  claude --dangerously-skip-permissions\n' "$CLI_USER"
