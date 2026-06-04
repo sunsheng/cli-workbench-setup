@@ -65,55 +65,6 @@ jobs:
           sudo apt-get install -y shellcheck
           shellcheck -s bash install-ubuntu.sh config/bashrc
 
-  ubuntu-root-bootstrap:
-    name: Ubuntu root bootstrap + verify
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-
-      - name: Run installer as root (auto-creates user)
-        shell: bash
-        run: |
-          set -euo pipefail
-          # `env -u SUDO_USER` simulates a real direct-root login (no sudo invoker),
-          # which is what triggers the bootstrap path. CLI_USER picks the username.
-          sudo env -u SUDO_USER CLI_USER=ciuser bash ./install-ubuntu.sh
-
-      - name: Verify user, group, and passwordless sudo
-        shell: bash
-        run: |
-          # Report each check explicitly rather than dying silently on set -e.
-          set -uo pipefail
-          rc=0
-          id ciuser || rc=1
-          # Membership via substring on a captured string (a `grep -q` pipe would
-          # SIGPIPE its upstream and trip pipefail even on success).
-          groups_list=" $(id -nG ciuser 2>/dev/null) "
-          if [[ "$groups_list" != *" sudo "* ]]; then echo "::error::ciuser not in sudo group:$groups_list"; rc=1; fi
-          # Needs sudo: /etc/sudoers.d is mode 0750 root, unreadable to the runner user.
-          if ! sudo test -f /etc/sudoers.d/90-ciuser-nopasswd; then echo "::error::sudoers drop-in missing"; rc=1; fi
-          if ! sudo visudo -cf /etc/sudoers.d/90-ciuser-nopasswd; then echo "::error::visudo check failed"; rc=1; fi
-          # The whole point: sudo without a password prompt.
-          if ! sudo -n -u ciuser sudo -n true; then echo "::error::passwordless sudo not working"; rc=1; fi
-          if [[ $rc -eq 0 ]]; then echo "passwordless sudo OK for ciuser"; fi
-          exit $rc
-
-      - name: Verify claude / codex installed in the new user's home
-        shell: bash
-        run: |
-          set -uo pipefail
-          # Tools land in ciuser's ~/.local/bin; check as that user. Use plain
-          # `sudo -u` (not -i): sudo -i flattens the multi-line command into one
-          # line, which breaks the for-loop.
-          sudo -u ciuser -H bash -c '
-            export PATH="$HOME/.local/bin:$PATH"
-            rc=0
-            for t in node claude codex; do
-              if command -v "$t" >/dev/null; then echo "OK: $t"; else echo "::error::missing for ciuser: $t"; rc=1; fi
-            done
-            exit $rc
-          '
-
   windows-install:
     name: Windows install + verify
     runs-on: windows-latest
@@ -159,56 +110,96 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - name: Run installer (--no-ssh)
+      - name: Run installer as root (--no-ssh; creates the target user)
         shell: bash
         run: |
           set -euo pipefail
-          bash ./install-ubuntu.sh --no-ssh
+          # The installer must run as root; it creates CLI_USER and installs the
+          # whole environment for them in one pass. --no-ssh so CI never touches
+          # the runner's sshd. `env -u SUDO_USER` mimics a direct root login.
+          sudo env -u SUDO_USER CLI_USER=ciuser CLI_PASSWORD=ciuser-pw \
+            bash ./install-ubuntu.sh --no-ssh
 
-      - name: Verify CLI tools are on PATH
+      - name: Verify user, group, and passwordless sudo
         shell: bash
         run: |
-          set -euo pipefail
-          export PATH="$HOME/.local/bin:$PATH"
-          tools=(git gh rg fd bat fzf jq 7z eza vim zoxide node npm npx codex claude)
-          missing=()
-          for tool in "${tools[@]}"; do
-            if command -v "$tool" >/dev/null 2>&1; then
-              echo "OK: $tool"
-            else
-              echo "::error::missing tool: $tool"
-              missing+=("$tool")
-            fi
-          done
-          if ((${#missing[@]})); then exit 1; fi
+          # Report each check explicitly rather than dying silently on set -e.
+          set -uo pipefail
+          rc=0
+          id ciuser || rc=1
+          # Membership via substring on a captured string (a `grep -q` pipe would
+          # SIGPIPE its upstream and trip pipefail even on success).
+          groups_list=" $(id -nG ciuser 2>/dev/null) "
+          if [[ "$groups_list" != *" sudo "* ]]; then echo "::error::ciuser not in sudo group:$groups_list"; rc=1; fi
+          # Needs sudo: /etc/sudoers.d is mode 0750 root, unreadable to the runner user.
+          if ! sudo test -f /etc/sudoers.d/90-ciuser-nopasswd; then echo "::error::sudoers drop-in missing"; rc=1; fi
+          if ! sudo visudo -cf /etc/sudoers.d/90-ciuser-nopasswd; then echo "::error::visudo check failed"; rc=1; fi
+          # The whole point: sudo without a password prompt.
+          if ! sudo -n -u ciuser sudo -n true; then echo "::error::passwordless sudo not working"; rc=1; fi
+          if [[ $rc -eq 0 ]]; then echo "passwordless sudo OK for ciuser"; fi
+          exit $rc
 
-      - name: Verify bash profile loads cleanly
+      - name: Verify console password and ~/.ssh scaffolding
         shell: bash
         run: |
-          set -euo pipefail
-          export PATH="$HOME/.local/bin:$PATH"
-          shopt -s expand_aliases
-          # shellcheck source=/dev/null
-          source "$HOME/.bashrc.d/cli-setup.bash"
-          for name in ll gst gd gdca glog gsh; do
-            type "$name" >/dev/null
-            echo "OK: $name"
-          done
-
-      - name: Verify Ubuntu fzf key bindings
-        shell: bash
-        run: |
-          set -euo pipefail
-          test -r "$HOME/.bashrc.d/cli-setup.bash"
-          grep -F "key-bindings.bash" "$HOME/.bashrc.d/cli-setup.bash" >/dev/null
-          grep -F "completion.bash" "$HOME/.bashrc.d/cli-setup.bash" >/dev/null
-          if [[ ! -r /usr/share/doc/fzf/examples/key-bindings.bash && ! -r /usr/share/fzf/key-bindings.bash ]]; then
-            echo "::error::fzf key-bindings.bash was not installed"
-            exit 1
+          set -uo pipefail
+          rc=0
+          # A console login password must be set (status P) so VNC/serial login works.
+          if [[ "$(sudo passwd -S ciuser | awk '{print $2}')" != "P" ]]; then
+            echo "::error::ciuser has no login password"; rc=1
           fi
-          bash -ic '
+          # ~/.ssh must be 0700 and owned by ciuser (it is unreadable to the runner).
+          perm=$(sudo stat -c '%a %U' /home/ciuser/.ssh)
+          if [[ "$perm" != "700 ciuser" ]]; then echo "::error::.ssh perms/owner wrong: $perm"; rc=1; fi
+          # authorized_keys must exist, be empty, 0600, owned by ciuser.
+          ak=$(sudo stat -c '%a %U %s' /home/ciuser/.ssh/authorized_keys)
+          if [[ "$ak" != "600 ciuser 0" ]]; then echo "::error::authorized_keys wrong: $ak"; rc=1; fi
+          if [[ $rc -eq 0 ]]; then echo "console password + ~/.ssh scaffolding OK"; fi
+          exit $rc
+
+      - name: Verify CLI tools are on PATH (in ciuser's home)
+        shell: bash
+        run: |
+          set -uo pipefail
+          # Tools land in ciuser's ~/.local/bin; check as that user. Plain `sudo -u`
+          # (not -i): sudo -i flattens the multi-line command, breaking the loop.
+          sudo -u ciuser -H bash -c '
+            export PATH="$HOME/.local/bin:$PATH"
+            rc=0
+            for tool in git gh rg fd bat fzf jq 7z eza vim zoxide node npm npx codex claude; do
+              if command -v "$tool" >/dev/null 2>&1; then echo "OK: $tool"; else echo "::error::missing for ciuser: $tool"; rc=1; fi
+            done
+            exit $rc
+          '
+
+      - name: Verify bash profile loads cleanly (as ciuser)
+        shell: bash
+        run: |
+          set -uo pipefail
+          sudo -u ciuser -H bash -c '
+            set -euo pipefail
+            export PATH="$HOME/.local/bin:$PATH"
+            shopt -s expand_aliases
+            source "$HOME/.bashrc.d/cli-setup.bash"
+            for name in ll gst gd gdca glog gsh; do
+              type "$name" >/dev/null
+              echo "OK: $name"
+            done
+          '
+
+      - name: Verify Ubuntu fzf key bindings (as ciuser)
+        shell: bash
+        run: |
+          set -uo pipefail
+          sudo -u ciuser -H bash -ic '
             set -e
             export PATH="$HOME/.local/bin:$PATH"
+            test -r "$HOME/.bashrc.d/cli-setup.bash"
+            grep -F "key-bindings.bash" "$HOME/.bashrc.d/cli-setup.bash" >/dev/null
+            grep -F "completion.bash" "$HOME/.bashrc.d/cli-setup.bash" >/dev/null
+            if [[ ! -r /usr/share/doc/fzf/examples/key-bindings.bash && ! -r /usr/share/fzf/key-bindings.bash ]]; then
+              echo "::error::fzf key-bindings.bash was not installed"; exit 1
+            fi
             source "$HOME/.bashrc.d/cli-setup.bash"
             echo "fzf Ctrl+T/Ctrl+R bindings loaded"
           '

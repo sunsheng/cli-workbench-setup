@@ -64,15 +64,20 @@ The native-first ordering is not arbitrary: `claude.ai/install.*` sits behind a 
 
 ## Ubuntu privilege / target-user model
 
-`install-ubuntu.sh` distinguishes **root-level work** from **user-scoped work**:
+`install-ubuntu.sh` **must run as root** — it checks `id -u` up front and `die`s with the current `whoami` otherwise. There is no self-bootstrap / re-exec; root does everything for the target user in a single pass. It distinguishes **root-level work** from **user-scoped work**:
 
-- `run_root` runs system changes (`apt`, writing `/etc/...`) — prefixed with `sudo` unless already root.
-- `TARGET_USER` is the human the environment is being built for: `${SUDO_USER:-$(id -un)}` — i.e. the user who invoked `sudo`, not root. User-scoped installs (Claude/Codex into `~/.local/bin`, dotfiles, npm prefix) go to that user's home.
-- `run_target_user` executes a command *as* `TARGET_USER` with the right `HOME`/`PATH`, using `runuser` (preferred, when root) or `sudo -u`. This is why the AI CLIs land in the target user's home even when the script runs under sudo.
+- `run_root` runs system changes (`apt`, writing `/etc/...`). Since the script is always root, `SUDO=()` and it just runs the command directly.
+- `TARGET_USER` is always the unprivileged `CLI_USER` (default `dev`), *not* root. User-scoped installs (Claude/Codex into `~/.local/bin`, dotfiles, npm prefix) go to that user's home.
+- `run_target_user` executes a command *as* `TARGET_USER` with the right `HOME`/`PATH`, using `runuser` (preferred) or `sudo -u`. This is why the AI CLIs land in the target user's home even though the script runs as root.
 
 This matters because Claude Code refuses `--dangerously-skip-permissions` under root: the tooling is installed for a normal user on purpose. Debian ships `fd`/`bat` as `fdfind`/`batcat`; the script creates user-level `fd`/`bat` shims in `~/.local/bin`.
 
-`install-ubuntu.sh` handles the root case itself via `maybe_bootstrap_user`: when run as root with no non-root `SUDO_USER`, instead of installing for root it creates an unprivileged user (`CLI_USER`, default `dev`) with passwordless sudo, then re-runs *itself* as that user (feeding the script over stdin via `runuser`/`sudo -u`, since a clone in `/root` is unreadable to the new user) and exits. That re-run forces `--no-ssh` so a remote root session can't lock itself out by flipping sshd to 58888/key-only. Running as a normal sudo user skips the bootstrap entirely.
+`setup_target_user` (called first, before any install step) creates/reuses `CLI_USER`, gives it passwordless sudo, and crucially makes the box recoverable after SSH is hardened to 58888/key-only:
+
+- It sets a **console login password** (`CLI_PASSWORD`, default `dev`) via `chpasswd`, but **only when the account has none yet** (`passwd -S` status `!= P`) so a re-run never clobbers a password you changed. This is what lets you log in on the **VNC / cloud serial console** — a console has no SSH key, so without a password a locked (`--disabled-password`) account is unreachable there.
+- It creates `~/.ssh` (0700) and an empty `~/.ssh/authorized_keys` (0600), owned by `CLI_USER`, ready for you to paste a public key to enable key-only SSH on 58888.
+
+Because the console password is the recovery path, `configure_ssh` runs in the *same pass* (no forced `--no-ssh`): locking SSH to 58888/key-only with an empty `authorized_keys` is safe since you can still get in via the console to drop your key. The old `maybe_bootstrap_user` re-exec model (re-running the script over stdin as the new user, forcing `--no-ssh`) is gone.
 
 ## Shell profiles
 

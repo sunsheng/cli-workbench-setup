@@ -63,12 +63,9 @@ OpenSSH Server 步骤需要管理员权限；普通会话会自动跳过 SSH 配
 
 ### Ubuntu Server
 
-`claude --dangerously-skip-permissions` **拒绝以 root/sudo 身份运行**。`install-ubuntu.sh` 据此自适应：
+`claude --dangerously-skip-permissions` **拒绝以 root/sudo 身份运行**。`install-ubuntu.sh` **必须以 root 运行**（`whoami` 必须是 root，否则直接报错退出，不会自举重跑）：它在**一次执行内**自动创建一个带免密 sudo 的普通用户（默认 `dev`），并以该用户身份把整套环境（CLI 工具 + `claude` / `codex` + bash/vim 配置）装到其名下。
 
-- **以 root 运行**（很多云主机默认）：它**自动创建一个带免密 sudo 的普通用户**（默认 `dev`），再以该用户身份把整套环境（CLI 工具 + `claude` / `codex` + bash/vim 配置）装到其名下。
-- **以普通 sudo 用户运行**：直接装到当前用户名下。
-
-所以一条命令即可，不用区分身份：
+一条命令即可（以 root 身份）：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/sunsheng/windows-cli-setup/main/install-ubuntu.sh | bash
@@ -82,7 +79,7 @@ cd windows-cli-setup
 bash ./install-ubuntu.sh
 ```
 
-root 自动建用户后，切过去即可使用：
+装好后切过去即可使用：
 
 ```bash
 sudo -iu dev
@@ -92,20 +89,22 @@ claude --dangerously-skip-permissions
 常用开关与环境变量：
 
 ```bash
-bash ./install-ubuntu.sh --no-profile    # 只装工具，不安装 bash/vim 配置
-bash ./install-ubuntu.sh --no-ssh        # 不安装/配置 OpenSSH Server
-CLI_USER=alice bash ./install-ubuntu.sh  # 以 root 运行时，指定自动创建的用户名（默认 dev）
-NODE_MAJOR=22 bash ./install-ubuntu.sh   # 如需固定到 Node.js 22.x
+bash ./install-ubuntu.sh --no-profile      # 只装工具，不安装 bash/vim 配置
+bash ./install-ubuntu.sh --no-ssh          # 不安装/配置 OpenSSH Server
+CLI_USER=alice bash ./install-ubuntu.sh    # 指定自动创建的用户名（默认 dev）
+CLI_PASSWORD=secret bash ./install-ubuntu.sh  # 指定该用户的控制台登录密码（默认 dev）
+NODE_MAJOR=22 bash ./install-ubuntu.sh     # 如需固定到 Node.js 22.x
 ```
 
-关于 root 自动建用户的几点：
+关于自动建用户的几点：
 
-1. 用 `adduser --disabled-password` 创建用户（不存在才创建，默认禁用密码登录），加入 `sudo` 组。
+1. 用 `adduser --disabled-password` 创建用户（不存在才创建），加入 `sudo` 组。
 2. 写入 `/etc/sudoers.d/90-<user>-nopasswd`（`NOPASSWD:ALL`，`0440`），落盘前后都用 `visudo` 校验，避免写坏锁死 sudo。
-3. 以新用户身份重跑安装器，**此路径强制 `--no-ssh`**：脚本通常跑在远程 root 会话里，自动把 sshd 切到 58888、禁用密码登录有把自己锁在门外的风险。需要 SSH 加固时，切到该用户后**单独再跑一次** `bash ./install-ubuntu.sh`（以普通用户身份运行就会配置 SSH）。
-4. 如需给新用户设密码，自行 `sudo passwd <user>`。
+3. **设置控制台登录密码**（`CLI_PASSWORD`，默认 `dev`），仅在该账户当前没有密码时设置（再次运行不会覆盖你改过的密码）。这样即使 SSH 已加固为 58888/仅密钥，仍可在 **VNC / 云串口控制台**用密码登录（控制台没有 SSH 密钥）。**首次登录后请用 `passwd` 改掉默认密码。**
+4. 创建 `~/.ssh`（`0700`）与空的 `~/.ssh/authorized_keys`（`0600`，属主为该用户），把你的公钥粘进去即可用密钥从 58888 登录。
+5. 由于有控制台密码兜底，SSH 加固在**同一次执行**内完成（不再强制 `--no-ssh`）：即便 `authorized_keys` 为空也不会把自己锁死——可从控制台登录再补公钥。
 
-Ubuntu 脚本会使用 `sudo` 安装系统包。默认 Node.js 目标为 24.x LTS；如果系统已有 `node` + `npm` + `npx` 且主版本不低于 24，会直接复用。
+Ubuntu 脚本会以 root 安装系统包。默认 Node.js 目标为 24.x LTS；如果系统已有 `node` + `npm` + `npx` 且主版本不低于 24，会直接复用。
 
 ## 脚本行为
 
@@ -132,7 +131,7 @@ Ubuntu 脚本会使用 `sudo` 安装系统包。默认 Node.js 目标为 24.x LT
 5. 为 Debian/Ubuntu 的 `fdfind` / `batcat` 创建用户级 `fd` / `bat` shim
 6. 安装 `config/bashrc` 到 `~/.bashrc.d/cli-setup.bash`，并在 `~/.bashrc` 追加幂等 source 块
 7. 安装 `config/vimrc` 到 `~/.vimrc`，并创建 `~/.vim/undo`
-8. 默认安装并配置 OpenSSH Server：仅监听 `58888`、禁用密码登录（仅密钥，并中和 cloud-init 的 `PasswordAuthentication yes`），创建 `ssh-users` 组，把当前用户加入该组，写入 `/etc/ssh/sshd_config.d/99-cli-setup.conf`
+8. 默认安装并配置 OpenSSH Server：仅监听 `58888`、禁用密码登录（仅密钥，并中和 cloud-init 的 `PasswordAuthentication yes`），创建 `ssh-users` 组，把自动创建的用户加入该组，写入 `/etc/ssh/sshd_config.d/99-cli-setup.conf`
 9. 如果系统已有 `ufw`，为 `58888/tcp` 添加 allow 规则；不会主动安装或启用 `ufw`
 
 ## 使用说明
@@ -334,9 +333,8 @@ ls ~/Library/Fonts | grep -i nerd
 
 1. Windows lint：解析 `install.ps1` 与 PowerShell profile，并运行 PSScriptAnalyzer。
 2. Ubuntu lint：`bash -n` 检查 `install-ubuntu.sh` 与配置，并运行 ShellCheck。
-2.5. Ubuntu root bootstrap：以 root 执行 `install-ubuntu.sh`，校验自动创建的用户、`sudo` 组、免密 sudo（`sudo -n`），以及 `claude` / `codex` 已装到新用户名下。
 3. Windows install：在 `windows-latest` 上执行 `.\install.ps1 -NoSsh`，验证 CLI、Node.js、Codex CLI、Claude Code CLI、profile 和 git 快捷方式。
-4. Ubuntu install：在 `ubuntu-latest` 上执行 `bash ./install-ubuntu.sh --no-ssh`，验证 CLI、Node.js、Codex CLI、Claude Code CLI、bash 配置、fzf Ctrl+R/Ctrl+T 绑定和 git 快捷方式。
+4. Ubuntu install：在 `ubuntu-latest` 上以 root 执行 `install-ubuntu.sh --no-ssh`，校验自动创建的用户、`sudo` 组、免密 sudo（`sudo -n`）、控制台登录密码、`~/.ssh/authorized_keys` 权限，以及 CLI、Node.js、Codex CLI、Claude Code CLI、bash 配置、fzf Ctrl+R/Ctrl+T 绑定和 git 快捷方式均已装到新用户名下。
 
 ## License
 

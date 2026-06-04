@@ -4,10 +4,12 @@ set -Eeuo pipefail
 NO_PROFILE=0
 NO_SSH=0
 NODE_MAJOR="${NODE_MAJOR:-24}"
-CLI_USER="${CLI_USER:-dev}"   # user to create+install for when run as root
+CLI_USER="${CLI_USER:-dev}"           # unprivileged user to create + install for
+CLI_PASSWORD="${CLI_PASSWORD:-dev}"   # console login password set on first run
 REPO_RAW_BASE="https://raw.githubusercontent.com/sunsheng/windows-cli-setup/main"
 SSH_PORTS=(58888)   # listen on 58888 only; port 22 dropped to dodge SSH brute-force
 APT_UPDATED=0
+PASSWORD_SET=0      # set to 1 by setup_target_user when it assigns a password
 
 usage() {
     cat <<'EOF'
@@ -15,9 +17,10 @@ Usage: bash ./install-ubuntu.sh [--no-profile] [--no-ssh]
 
 One-shot setup for a modern Ubuntu Server command-line environment.
 
-Run as a normal sudo user to set up that user. Run as root and it will instead
-create an unprivileged user (claude refuses to run as root), give it passwordless
-sudo, and install everything for that user.
+Must be run as root (whoami must be root). In a single pass it creates an
+unprivileged user (claude refuses to run as root), gives it passwordless sudo and
+a console login password, prepares an empty ~/.ssh/authorized_keys, and installs
+the whole environment for that user. There is no self-bootstrap / re-exec.
 
 Options:
   --no-profile   Install tools only; do not change bash/vim config.
@@ -27,8 +30,9 @@ Options:
 Environment:
   NODE_MAJOR     Node.js major version to install when node is missing or old.
                  Defaults to 24.
-  CLI_USER       When run as root, the unprivileged user to create and install
-                 for. Defaults to dev.
+  CLI_USER       Unprivileged user to create and install for. Defaults to dev.
+  CLI_PASSWORD   Console login password assigned to CLI_USER on first run (only
+                 when the account has no password yet). Defaults to dev.
 EOF
 }
 
@@ -66,28 +70,23 @@ if ! command_exists apt-get; then
     die "apt-get is required."
 fi
 
-if [[ "$(id -u)" -eq 0 ]]; then
-    SUDO=()
-else
-    command_exists sudo || die "sudo is required when not running as root."
-    # Pre-warm sudo credentials for interactive use, but skip when sudo is already
-    # passwordless: `sudo -v` can still demand a password for a NOPASSWD user and
-    # would then fail in a non-interactive session with no tty (e.g. the root
-    # bootstrap below re-runs this as a freshly created NOPASSWD user).
-    if ! sudo -n true 2>/dev/null; then
-        sudo -v
-    fi
-    SUDO=(sudo)
+# Must run as root: whoami has to be root, anything else stops here. There is no
+# self-bootstrap / re-exec — root creates the target user and installs for them
+# in one pass.
+if [[ "$(id -u)" -ne 0 ]]; then
+    die "Must be run as root (whoami=$(whoami)). Re-run with: sudo -i   (or as root)."
 fi
+SUDO=()
 
-TARGET_USER="${SUDO_USER:-$(id -un)}"
-TARGET_HOME="$(getent passwd "$TARGET_USER" | cut -d: -f6)"
-TARGET_GROUP="$(id -gn "$TARGET_USER")"
-USER_BIN="$TARGET_HOME/.local/bin"
+[[ "$CLI_USER" =~ ^[a-z_][a-z0-9_-]*$ ]] ||
+    die "Invalid CLI_USER '$CLI_USER' (use lowercase letters, digits, '-' or '_')."
 
-if [[ -z "$TARGET_HOME" || ! -d "$TARGET_HOME" ]]; then
-    die "Cannot resolve home directory for user '$TARGET_USER'."
-fi
+# The install target is always the unprivileged CLI_USER. TARGET_HOME/_GROUP and
+# USER_BIN are filled in by setup_target_user once the account exists.
+TARGET_USER="$CLI_USER"
+TARGET_HOME=""
+TARGET_GROUP=""
+USER_BIN=""
 
 SCRIPT_DIR=""
 SCRIPT_SOURCE="${BASH_SOURCE[0]:-}"
@@ -123,20 +122,17 @@ run_target_user() {
     fi
 }
 
-# When run as root with no non-root invoker, install for a normal user instead of
-# root: `claude --dangerously-skip-permissions` refuses to run as root. Create (or
-# reuse) CLI_USER with passwordless sudo, then re-run this whole installer as them
-# and exit. Forces --no-ssh: this typically runs over a remote root session, and
-# flipping sshd to 58888/key-only here could lock you out — harden SSH later as
-# that user. No-op (returns) when already a normal user.
-maybe_bootstrap_user() {
-    [[ "$(id -u)" -eq 0 ]] || return 0
-    [[ -z "${SUDO_USER:-}" || "$SUDO_USER" == "root" ]] || return 0
-
-    [[ "$CLI_USER" =~ ^[a-z_][a-z0-9_-]*$ ]] ||
-        die "Invalid CLI_USER '$CLI_USER' (use lowercase letters, digits, '-' or '_')."
-
-    step "Running as root: setting up unprivileged user '$CLI_USER' (claude cannot run as root)..."
+# Create (or reuse) the unprivileged CLI_USER and prepare it as the install
+# target. `claude --dangerously-skip-permissions` refuses to run as root, so the
+# whole environment is built for this normal user (everything user-scoped goes
+# through run_target_user). The account gets:
+#   - passwordless sudo,
+#   - a login password, so you can still sign in on the VNC / cloud serial console
+#     after SSH is locked to key-only on 58888 (a console has no SSH key), and
+#   - an empty ~/.ssh/authorized_keys (0700 dir, 0600 file) ready for your key.
+# This runs in-process (no re-exec); it just fills in TARGET_HOME/_GROUP/USER_BIN.
+setup_target_user() {
+    step "Setting up unprivileged user '$CLI_USER' (claude cannot run as root)..."
     if id "$CLI_USER" >/dev/null 2>&1; then
         skip "User '$CLI_USER' already exists."
     else
@@ -154,49 +150,37 @@ maybe_bootstrap_user() {
     rm -f "$tmp"
     visudo -cf "$sudoers" >/dev/null || die "visudo check failed for $sudoers."
 
-    local home
-    home="$(getent passwd "$CLI_USER" | cut -d: -f6)"
-    [[ -n "$home" && -d "$home" ]] || die "Cannot resolve home directory for '$CLI_USER'."
+    TARGET_HOME="$(getent passwd "$CLI_USER" | cut -d: -f6)"
+    TARGET_GROUP="$(id -gn "$CLI_USER")"
+    USER_BIN="$TARGET_HOME/.local/bin"
+    [[ -n "$TARGET_HOME" && -d "$TARGET_HOME" ]] ||
+        die "Cannot resolve home directory for '$CLI_USER'."
 
-    # Get a copy of this installer the new user can read (a clone may live in
-    # /root, mode 0700, which they cannot traverse) and feed it via stdin, so the
-    # new user needs no access to the path.
-    local self="" fetched=0
-    if [[ -n "$SCRIPT_DIR" && -f "$SCRIPT_DIR/install-ubuntu.sh" ]]; then
-        self="$SCRIPT_DIR/install-ubuntu.sh"
+    # Give the account a console login password. Only set one when it currently
+    # has none (passwd -S status != P): adduser --disabled-password leaves it
+    # locked ("L"), but a re-run must never clobber a password you have changed.
+    local pwstatus
+    pwstatus="$(passwd -S "$CLI_USER" 2>/dev/null | awk '{print $2}')"
+    if [[ "$pwstatus" != "P" ]]; then
+        printf '%s:%s\n' "$CLI_USER" "$CLI_PASSWORD" | chpasswd
+        PASSWORD_SET=1
+        printf '    Set console login password for %s (change it after first login: passwd).\n' "$CLI_USER"
     else
-        command_exists curl || die "curl is required to fetch install-ubuntu.sh."
-        self="$(mktemp)"
-        fetched=1
-        curl -fsSL "$REPO_RAW_BASE/install-ubuntu.sh" -o "$self"
+        skip "User '$CLI_USER' already has a login password."
     fi
 
-    local args=(--no-ssh)
-    if ((NO_PROFILE)); then
-        args+=(--no-profile)
-    fi
-
-    local rc=0
-    if command_exists runuser; then
-        runuser -u "$CLI_USER" -- env -u SUDO_USER HOME="$home" NODE_MAJOR="$NODE_MAJOR" \
-            bash -s -- "${args[@]}" < "$self" || rc=$?
+    # Prepare an empty ~/.ssh/authorized_keys with correct ownership/permissions
+    # so you can paste a public key in to enable key-only SSH on 58888.
+    local ssh_dir="$TARGET_HOME/.ssh" auth_keys="$TARGET_HOME/.ssh/authorized_keys"
+    install -d -m 0700 -o "$CLI_USER" -g "$TARGET_GROUP" "$ssh_dir"
+    if [[ -e "$auth_keys" ]]; then
+        chown "$CLI_USER:$TARGET_GROUP" "$auth_keys"
+        chmod 0600 "$auth_keys"
+        skip "authorized_keys already exists for '$CLI_USER'."
     else
-        # SC2024: the redirect is intentionally opened by our (root) shell, not
-        # the dropped-privilege user — that is the point.
-        # shellcheck disable=SC2024
-        sudo -u "$CLI_USER" -H env -u SUDO_USER NODE_MAJOR="$NODE_MAJOR" \
-            bash -s -- "${args[@]}" < "$self" || rc=$?
+        install -m 0600 -o "$CLI_USER" -g "$TARGET_GROUP" /dev/null "$auth_keys"
+        printf '    Created empty %s (add your public key here).\n' "$auth_keys"
     fi
-    if ((fetched)); then
-        rm -f "$self"
-    fi
-    ((rc == 0)) || die "Install for '$CLI_USER' failed (exit $rc)."
-
-    printf '\n'
-    step "Done! User '$CLI_USER' has passwordless sudo, and claude / codex are installed."
-    printf '  Switch to it:  sudo -iu %s\n' "$CLI_USER"
-    printf '  Then run:      claude --dangerously-skip-permissions\n'
-    exit 0
 }
 
 apt_update_once() {
@@ -681,11 +665,19 @@ configure_ssh() {
     restart_ssh_service
 }
 
-maybe_bootstrap_user
+setup_target_user
 configure_locale
 install_tools
 install_profile
 configure_ssh
 
 printf '\n'
-step "Done! Open a new bash session, or run: source ~/.bashrc"
+step "Done! Environment installed for user '$CLI_USER'."
+if [[ "$PASSWORD_SET" -eq 1 ]]; then
+    printf '  Console (VNC/serial) login:  %s / %s   (change it: passwd)\n' "$CLI_USER" "$CLI_PASSWORD"
+else
+    printf '  Console (VNC/serial) login:  %s / <existing password unchanged>\n' "$CLI_USER"
+fi
+printf '  Enable SSH: add your public key to %s/.ssh/authorized_keys, then: ssh -p %s %s@<host>\n' \
+    "$TARGET_HOME" "${SSH_PORTS[0]}" "$CLI_USER"
+printf '  Become the user:  sudo -iu %s   then run:  claude --dangerously-skip-permissions\n' "$CLI_USER"
