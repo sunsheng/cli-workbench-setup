@@ -10,7 +10,7 @@ Two parallel one-shot installers that provision the *same* modern CLI environmen
 - `add-windows-admin-ssh-key.ps1` — Windows helper that appends a public key to `%ProgramData%\ssh\administrators_authorized_keys` and fixes its ACL.
 - `install-ubuntu.sh` — Ubuntu Server, via `apt`.
 
-They are deliberate mirrors: the same tool set (git, gh, ripgrep, fd, bat, fzf, jq, 7zip, eza, vim, zoxide, Node.js LTS, Codex CLI, Claude Code CLI), the same idempotent step structure, the same AI-CLI install strategy, and the same SSH hardening posture. **When you change behavior on one side, check whether the other side needs the mirror change** (and update `README.md`, which documents both). `profiles/` holds the shipped shell and Vim profiles consumed by both.
+They are deliberate mirrors: the same tool set (git, gh, ripgrep, fd, bat, fzf, jq, 7zip, eza, vim, zoxide, Node.js LTS, Codex CLI, Claude Code CLI), the same idempotent step structure, the same AI-CLI install strategy, and the same SSH hardening posture. Windows additionally installs **PowerShell 7 (pwsh)** + the **PSFzf** module and points its SSH default shell at pwsh; Ubuntu installs **zsh** as the default login shell. **When you change behavior on one side, check whether the other side needs the mirror change** (and update `README.md`, which documents both). `profiles/` holds the shipped shell and Vim profiles consumed by both (`ubuntu-zprofile`, `ubuntu-zshrc`, `ubuntu-bashrc`, `powershell-profile.ps1`, `ubuntu-vimrc`, `windows-vimrc`).
 
 `README.md` is the user-facing doc and is written in Chinese — keep it in sync with any behavior change.
 
@@ -72,11 +72,11 @@ The native-first ordering is not arbitrary: `claude.ai/install.*` sits behind a 
 
 `install-ubuntu.sh` **must run as root** — it checks `id -u` up front and `die`s with the current `whoami` otherwise. There is no self-bootstrap / re-exec; root does everything for the target user in a single pass. It distinguishes **root-level work** from **user-scoped work**:
 
-- `run_root` runs system changes (`apt`, writing `/etc/...`). Since the script is always root, `SUDO=()` and it just runs the command directly.
+- Root-level system changes (`apt`, writing `/etc/...`) run directly — the script is always root, so there is no `sudo` indirection.
 - `TARGET_USER` is always the unprivileged `CLI_USER` (default `dev`), *not* root. User-scoped installs (Claude/Codex into `~/.local/bin`, dotfiles, npm prefix) go to that user's home.
-- `run_target_user` executes a command *as* `TARGET_USER` with the right `HOME`/`PATH`, using `runuser` (preferred) or `sudo -u`. This is why the AI CLIs land in the target user's home even though the script runs as root.
+- `run_target_user` executes a command *as* `TARGET_USER` with the right `HOME`/`PATH` via `runuser` (always present from util-linux). This is why the AI CLIs land in the target user's home even though the script runs as root.
 
-This matters because Claude Code refuses `--dangerously-skip-permissions` under root: the tooling is installed for a normal user on purpose. Debian ships `fd`/`bat` as `fdfind`/`batcat`; the script creates user-level `fd`/`bat` shims in `~/.local/bin`.
+This matters because Claude Code refuses `--dangerously-skip-permissions` under root: the tooling is installed for a normal user on purpose. Debian ships `fd`/`bat` as `fdfind`/`batcat`; the script creates user-level `fd`/`bat` shims in `~/.local/bin`. `eza` is installed from apt (universe) on Ubuntu 24.04+ and from Scoop on Windows.
 
 `setup_target_user` (called first, before any install step) creates/reuses `CLI_USER`, gives it passwordless sudo, and crucially makes the box recoverable after SSH is hardened to 58888/key-only:
 

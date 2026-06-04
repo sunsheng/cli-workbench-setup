@@ -75,6 +75,12 @@ if [[ -r /etc/os-release ]]; then
     if [[ "${ID:-}" != "ubuntu" ]]; then
         die "This installer targets Ubuntu Server; detected ID=${ID:-unknown}."
     fi
+    # eza (and a clean apt-only path) requires Ubuntu 24.04+ (noble), where eza
+    # first ships in the universe repo. Fail clearly on older releases.
+    ubuntu_major="${VERSION_ID:-0}"; ubuntu_major="${ubuntu_major%%.*}"
+    if [[ ! "$ubuntu_major" =~ ^[0-9]+$ ]] || ((ubuntu_major < 24)); then
+        die "This installer targets Ubuntu 24.04+; detected VERSION_ID=${VERSION_ID:-unknown}."
+    fi
 else
     die "Cannot detect OS: /etc/os-release is missing."
 fi
@@ -89,7 +95,6 @@ fi
 if [[ "$(id -u)" -ne 0 ]]; then
     die "Must be run as root (whoami=$(whoami)). Re-run with: sudo -i   (or as root)."
 fi
-SUDO=()
 
 [[ "$CLI_USER" =~ ^[a-z_][a-z0-9_-]*$ ]] ||
     die "Invalid CLI_USER '$CLI_USER' (use lowercase letters, digits, '-' or '_')."
@@ -117,22 +122,10 @@ if [[ -n "$SCRIPT_SOURCE" ]]; then
     fi
 fi
 
-run_root() {
-    "${SUDO[@]}" "$@"
-}
-
+# The script always runs as root; runuser (util-linux, always present) drops to
+# the target user with the right HOME/PATH for user-scoped installs.
 run_target_user() {
-    if [[ "$(id -u)" -eq 0 && "$TARGET_USER" != "root" ]]; then
-        if command_exists runuser; then
-            runuser -u "$TARGET_USER" -- env HOME="$TARGET_HOME" PATH="$USER_BIN:$PATH" "$@"
-        elif command_exists sudo; then
-            sudo -u "$TARGET_USER" -H env HOME="$TARGET_HOME" PATH="$USER_BIN:$PATH" "$@"
-        else
-            die "runuser or sudo is required to install user-scoped CLI tools for '$TARGET_USER'."
-        fi
-    else
-        env HOME="$TARGET_HOME" PATH="$USER_BIN:$PATH" "$@"
-    fi
+    runuser -u "$TARGET_USER" -- env HOME="$TARGET_HOME" PATH="$USER_BIN:$PATH" "$@"
 }
 
 # Create (or reuse) the unprivileged CLI_USER and prepare it as the install
@@ -205,27 +198,38 @@ setup_target_user() {
 apt_update_once() {
     if [[ "$APT_UPDATED" -eq 0 ]]; then
         step "Updating apt metadata..."
-        run_root env DEBIAN_FRONTEND=noninteractive apt-get update
+        env DEBIAN_FRONTEND=noninteractive apt-get update
         APT_UPDATED=1
     fi
 }
 
 apt_install() {
     apt_update_once
-    run_root env DEBIAN_FRONTEND=noninteractive apt-get install -y "$@"
+    env DEBIAN_FRONTEND=noninteractive apt-get install -y "$@"
 }
 
 enable_universe() {
     step "Ensuring Ubuntu universe repository..."
+    # Cloud Ubuntu images already enable universe; only touch apt sources (and
+    # pull software-properties-common) when it is genuinely missing. Skipping
+    # here avoids an extra apt update and an unnecessary package install.
+    #
+    # Look only at *active* entries: one-line `deb`/`deb-src` lines and deb822
+    # `Components:` lines (leading '#' excluded), then test for `universe` as a
+    # whitespace/comma-delimited token. Done without a `grep -q` pipe so a
+    # SIGPIPE on the upstream grep can't trip `set -o pipefail`.
+    local active_sources
+    active_sources="$(grep -RhsE '^[[:space:]]*(deb[[:space:]]|deb-src[[:space:]]|Components:)' \
+        /etc/apt/sources.list /etc/apt/sources.list.d/ 2>/dev/null || true)"
+    if [[ " ${active_sources//[$'\t\n,']/ } " == *" universe "* ]]; then
+        skip "universe repository already enabled."
+        return
+    fi
     if ! command_exists add-apt-repository; then
         apt_install software-properties-common
     fi
-    run_root add-apt-repository -y universe
+    add-apt-repository -y universe
     APT_UPDATED=0
-}
-
-apt_has_package() {
-    apt-cache show "$1" >/dev/null 2>&1
 }
 
 resolve_profile_file() {
@@ -251,15 +255,11 @@ resolve_profile_file() {
 }
 
 chown_target() {
-    if [[ "$(id -u)" -eq 0 ]]; then
-        chown "$TARGET_USER:$TARGET_GROUP" "$@"
-    fi
+    chown "$TARGET_USER:$TARGET_GROUP" "$@"
 }
 
 chown_target_link() {
-    if [[ "$(id -u)" -eq 0 ]]; then
-        chown -h "$TARGET_USER:$TARGET_GROUP" "$@"
-    fi
+    chown -h "$TARGET_USER:$TARGET_GROUP" "$@"
 }
 
 target_mkdir() {
@@ -319,7 +319,7 @@ set_default_shell() {
         return
     fi
 
-    run_root usermod -s "$shell_path" "$TARGET_USER"
+    usermod -s "$shell_path" "$TARGET_USER"
     printf '    Set default shell for %s to %s\n' "$TARGET_USER" "$shell_path"
 }
 
@@ -364,7 +364,7 @@ node_major_version() {
 setup_nodesource() {
     step "Configuring NodeSource Node.js ${NODE_MAJOR}.x repository..."
     apt_install ca-certificates curl gnupg
-    run_root install -d -m 0755 /etc/apt/keyrings
+    install -d -m 0755 /etc/apt/keyrings
 
     local tmp_dir tmp_key tmp_gpg
     tmp_dir="$(mktemp -d)"
@@ -372,9 +372,9 @@ setup_nodesource() {
     tmp_gpg="$tmp_dir/nodesource.gpg"
     curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key -o "$tmp_key"
     gpg --dearmor -o "$tmp_gpg" "$tmp_key"
-    run_root install -m 0644 "$tmp_gpg" /etc/apt/keyrings/nodesource.gpg
+    install -m 0644 "$tmp_gpg" /etc/apt/keyrings/nodesource.gpg
     printf 'deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_%s.x nodistro main\n' "$NODE_MAJOR" |
-        run_root tee /etc/apt/sources.list.d/nodesource.list >/dev/null
+        tee /etc/apt/sources.list.d/nodesource.list >/dev/null
     rm -rf "$tmp_dir"
     APT_UPDATED=0
 }
@@ -497,73 +497,34 @@ install_claude_code_cli() {
     command_exists claude || die "claude was not found after installation."
 }
 
-install_eza_release() {
-    if command_exists eza; then
-        skip "eza already available."
-        return
-    fi
-
-    local arch asset tmp eza_bin
-    arch="$(uname -m)"
-    case "$arch" in
-        x86_64|amd64) asset="eza_x86_64-unknown-linux-gnu.tar.gz" ;;
-        aarch64|arm64) asset="eza_aarch64-unknown-linux-gnu.tar.gz" ;;
-        *) die "No eza binary fallback is configured for architecture '$arch'." ;;
-    esac
-
-    step "Installing eza from upstream release..."
-    tmp="$(mktemp -d)"
-    curl -fsSL "https://github.com/eza-community/eza/releases/latest/download/$asset" -o "$tmp/eza.tar.gz"
-    tar -xzf "$tmp/eza.tar.gz" -C "$tmp"
-    eza_bin="$(find "$tmp" -type f -name eza -perm -u+x -print -quit)"
-    if [[ -z "$eza_bin" ]]; then
-        rm -rf "$tmp"
-        die "Could not find eza binary in release archive."
-    fi
-    run_root install -m 0755 "$eza_bin" /usr/local/bin/eza
-    rm -rf "$tmp"
-}
-
 ensure_locale_line() {
     local loc="$1"
     local line="$loc UTF-8"
     local escaped="${loc//./\\.}"
-    if run_root grep -Fxq "$line" /etc/locale.gen 2>/dev/null; then
+    if grep -Fxq "$line" /etc/locale.gen 2>/dev/null; then
         return
     fi
-    if run_root grep -Eq "^#[[:space:]]*${escaped} UTF-8([[:space:]]|$)" /etc/locale.gen 2>/dev/null; then
-        run_root sed -ri "s|^#[[:space:]]*(${escaped} UTF-8)|\1|" /etc/locale.gen
+    if grep -Eq "^#[[:space:]]*${escaped} UTF-8([[:space:]]|$)" /etc/locale.gen 2>/dev/null; then
+        sed -ri "s|^#[[:space:]]*(${escaped} UTF-8)|\1|" /etc/locale.gen
     else
-        printf '%s\n' "$line" | run_root tee -a /etc/locale.gen >/dev/null
+        printf '%s\n' "$line" | tee -a /etc/locale.gen >/dev/null
     fi
 }
 
-# Generate UTF-8 locales so SSH sessions that forward an ungenerated locale
-# (e.g. a macOS/Linux client sending LC_ALL=zh_CN.UTF-8) stop printing
-# "setlocale: cannot change locale". en_US.UTF-8 and zh_CN.UTF-8 are always
-# generated; any UTF-8 locale forwarded into *this* session is added too.
+# Generate the en_US.UTF-8 locale and make it the system default so a bare
+# server stops sitting on C/POSIX (which makes SSH clients print
+# "setlocale: cannot change locale").
 configure_locale() {
-    step "Ensuring UTF-8 locales..."
+    step "Ensuring en_US.UTF-8 locale..."
     apt_install locales
 
-    local wanted=(en_US.UTF-8 zh_CN.UTF-8)
-    local v
-    for v in "${LC_ALL:-}" "${LANG:-}" "${LC_CTYPE:-}" "${LC_MESSAGES:-}"; do
-        case "$v" in
-            ?*.[Uu][Tt][Ff]*) wanted+=("${v%%.*}.UTF-8") ;;
-        esac
-    done
-
-    local loc
-    for loc in "${wanted[@]}"; do
-        ensure_locale_line "$loc"
-    done
-    run_root locale-gen
+    ensure_locale_line en_US.UTF-8
+    locale-gen
 
     # Give the system a stable default when none is configured (a bare server
     # otherwise sits on C/POSIX). Never override an existing LANG.
-    if [[ ! -s /etc/default/locale ]] || ! run_root grep -q '^LANG=' /etc/default/locale 2>/dev/null; then
-        run_root update-locale LANG=en_US.UTF-8
+    if [[ ! -s /etc/default/locale ]] || ! grep -q '^LANG=' /etc/default/locale 2>/dev/null; then
+        update-locale LANG=en_US.UTF-8
     fi
 }
 
@@ -573,10 +534,10 @@ install_tools() {
     apt_update_once
 
     local packages=(
-        build-essential
         bat
         ca-certificates
         curl
+        eza
         fd-find
         fzf
         gh
@@ -591,19 +552,11 @@ install_tools() {
         zoxide
     )
 
-    if apt_has_package eza; then
-        packages+=(eza)
-    fi
-
     if [[ "$NO_SSH" -eq 0 ]]; then
         packages+=(openssh-server)
     fi
 
     apt_install "${packages[@]}"
-
-    if ! apt_has_package eza; then
-        install_eza_release
-    fi
 
     install_nodejs
     ensure_user_bin_links
@@ -658,17 +611,11 @@ restart_ssh_service() {
         sshd_bin="/usr/sbin/sshd"
     fi
     if [[ -n "$sshd_bin" ]]; then
-        run_root "$sshd_bin" -t
+        "$sshd_bin" -t
     fi
 
-    if command_exists systemctl && [[ -d /run/systemd/system ]]; then
-        run_root systemctl enable --now ssh
-        run_root systemctl restart ssh
-    elif command_exists service; then
-        run_root service ssh restart
-    else
-        warn "No service manager found; ssh config was written but ssh was not restarted."
-    fi
+    systemctl enable --now ssh
+    systemctl restart ssh
 }
 
 configure_ssh() {
@@ -678,8 +625,8 @@ configure_ssh() {
     fi
 
     step "Configuring OpenSSH Server..."
-    run_root groupadd -f ssh-users
-    run_root usermod -aG ssh-users "$TARGET_USER"
+    groupadd -f ssh-users
+    usermod -aG ssh-users "$TARGET_USER"
 
     local conf="/etc/ssh/sshd_config.d/99-cli-setup.conf"
     local tmp
@@ -692,7 +639,7 @@ configure_ssh() {
         printf 'AllowGroups sudo ssh-users\n'
         printf 'PasswordAuthentication no\n'
     } > "$tmp"
-    run_root install -m 0644 "$tmp" "$conf"
+    install -m 0644 "$tmp" "$conf"
     rm -f "$tmp"
 
     # Cloud images often ship /etc/ssh/sshd_config.d/50-cloud-init.conf with
@@ -703,14 +650,14 @@ configure_ssh() {
     for dropin in /etc/ssh/sshd_config.d/*.conf; do
         [[ -e "$dropin" ]] || continue
         [[ "$dropin" == "$conf" ]] && continue
-        if run_root grep -Eq '^[[:space:]]*PasswordAuthentication[[:space:]]+yes' "$dropin"; then
-            run_root sed -ri 's/^([[:space:]]*PasswordAuthentication[[:space:]]+yes.*)$/# \1  # disabled by install-ubuntu.sh/' "$dropin"
+        if grep -Eq '^[[:space:]]*PasswordAuthentication[[:space:]]+yes' "$dropin"; then
+            sed -ri 's/^([[:space:]]*PasswordAuthentication[[:space:]]+yes.*)$/# \1  # disabled by install-ubuntu.sh/' "$dropin"
         fi
     done
 
     if command_exists ufw; then
         for port in "${SSH_PORTS[@]}"; do
-            run_root ufw allow "$port/tcp"
+            ufw allow "$port/tcp"
         done
     else
         skip "ufw not installed; firewall rules were not changed."
