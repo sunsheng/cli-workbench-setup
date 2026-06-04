@@ -387,10 +387,11 @@ foreach ($t in $tools) {
 }
 
 # --- 6. Ensure Node.js LTS --------------------------------------------------
-# Skip when node is already present; otherwise install the Scoop LTS package.
+# Skip only when a usable node+npm toolchain is already present (the AI CLI npm
+# fallback needs npm); otherwise install the Scoop LTS package.
 Write-Step "Ensuring Node.js $NodeMajor.x LTS..."
-if (Get-Command node -ErrorAction SilentlyContinue) {
-    Write-Skip "node $(node --version) already available."
+if ((Get-Command node -ErrorAction SilentlyContinue) -and (Get-Command npm -ErrorAction SilentlyContinue)) {
+    Write-Skip "node $(node --version) and npm already available."
 } else {
     scoop install nodejs-lts
 }

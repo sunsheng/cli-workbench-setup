@@ -75,6 +75,12 @@ if [[ -r /etc/os-release ]]; then
     if [[ "${ID:-}" != "ubuntu" ]]; then
         die "This installer targets Ubuntu Server; detected ID=${ID:-unknown}."
     fi
+    # eza (and a clean apt-only path) requires Ubuntu 24.04+ (noble), where eza
+    # first ships in the universe repo. Fail clearly on older releases.
+    ubuntu_major="${VERSION_ID:-0}"; ubuntu_major="${ubuntu_major%%.*}"
+    if [[ ! "$ubuntu_major" =~ ^[0-9]+$ ]] || ((ubuntu_major < 24)); then
+        die "This installer targets Ubuntu 24.04+; detected VERSION_ID=${VERSION_ID:-unknown}."
+    fi
 else
     die "Cannot detect OS: /etc/os-release is missing."
 fi
@@ -207,7 +213,15 @@ enable_universe() {
     # Cloud Ubuntu images already enable universe; only touch apt sources (and
     # pull software-properties-common) when it is genuinely missing. Skipping
     # here avoids an extra apt update and an unnecessary package install.
-    if grep -RhsqE '(^|[ ,])universe([ ,]|$)' /etc/apt/sources.list /etc/apt/sources.list.d/ 2>/dev/null; then
+    #
+    # Look only at *active* entries: one-line `deb`/`deb-src` lines and deb822
+    # `Components:` lines (leading '#' excluded), then test for `universe` as a
+    # whitespace/comma-delimited token. Done without a `grep -q` pipe so a
+    # SIGPIPE on the upstream grep can't trip `set -o pipefail`.
+    local active_sources
+    active_sources="$(grep -RhsE '^[[:space:]]*(deb[[:space:]]|deb-src[[:space:]]|Components:)' \
+        /etc/apt/sources.list /etc/apt/sources.list.d/ 2>/dev/null || true)"
+    if [[ " ${active_sources//[$'\t\n,']/ } " == *" universe "* ]]; then
         skip "universe repository already enabled."
         return
     fi
