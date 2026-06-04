@@ -6,7 +6,7 @@
 
 - Windows：使用 [Scoop](https://scoop.sh) 安装工具，配置 PowerShell 7、PSFzf、zoxide、Vim 和 OpenSSH Server。
 - Ubuntu Server：使用 apt 安装工具，以 root 一次执行，自动创建普通用户并把环境安装到该用户下。
-- 两端保持相同的日常命令体验：`ls`/`ll`/`tree`、`cat`、`rg`、`fd`、`z`、`fzf` 快捷键、git 查看类别名等。
+- 两端保持相同的日常命令体验：`ls`/`l`/`ll`/`tree`、`cat`、`rg`、`fd`、`z`、`fzf` 快捷键、git 查看类别名等。
 
 > Windows 路径在 Windows Server 2025 / PowerShell 7 上验证；Ubuntu 路径面向 Ubuntu Server 24.04 LTS 及更新版本，并在 GitHub Actions 的 `ubuntu-latest` 上测试。
 
@@ -214,6 +214,7 @@ ssh -p 58888 dev@<主机>
 
 ```bash
 ls       # 简洁列表，目录优先，带图标
+l        # 简洁列表短命令
 ll       # 详细列表，包含隐藏文件和 git 状态
 la       # 显示所有文件
 lt       # 树形视图，默认 2 层

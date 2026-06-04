@@ -17,6 +17,7 @@ if ($env:Path -notlike "*$env:USERPROFILE\scoop\shims*") {
 # fonts on the server.
 if (Test-Path Alias:ls) { Remove-Item Alias:ls -Force }
 function ls  { eza --icons --group-directories-first @args }                 # plain listing
+function l   { eza --icons --group-directories-first @args }                 # short plain listing
 function ll  { eza --icons -la --group-directories-first --git @args }       # long, with hidden + git status
 function la  { eza --icons -a  --group-directories-first @args }             # all files
 function lt  { eza --icons --tree --level=2 @args }                          # tree view, 2 levels (replaces `tree`)

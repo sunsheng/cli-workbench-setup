@@ -98,7 +98,9 @@ jobs:
         shell: pwsh
         run: |
           . $PROFILE
-          if (-not (Test-Path Function:\ll)) { Write-Host "::error::profile did not define 'll'"; exit 1 }
+          foreach ($fn in 'l', 'll') {
+            if (-not (Test-Path "Function:\$fn")) { Write-Host "::error::profile did not define '$fn'"; exit 1 }
+          }
           foreach ($fn in 'gst', 'gd', 'gdca', 'glog', 'gsh') {
             if (-not (Test-Path "Function:\$fn")) { Write-Host "::error::profile did not define git shortcut '$fn'"; exit 1 }
           }
@@ -182,7 +184,7 @@ jobs:
             export PATH="$HOME/.local/bin:$PATH"
             shopt -s expand_aliases
             source "$HOME/.bashrc.d/cli-setup.bash"
-            for name in ll gst gd gdca glog gsh; do
+            for name in l ll gst gd gdca glog gsh; do
               type "$name" >/dev/null
               echo "OK: $name"
             done

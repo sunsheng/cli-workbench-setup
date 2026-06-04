@@ -8,6 +8,7 @@ esac
 # eza: modern replacement for ls / tree.
 if command -v eza >/dev/null 2>&1; then
     alias ls='eza --icons --group-directories-first'
+    alias l='eza --icons --group-directories-first'
     alias ll='eza --icons -la --group-directories-first --git'
     alias la='eza --icons -a --group-directories-first'
     alias lt='eza --icons --tree --level=2'
