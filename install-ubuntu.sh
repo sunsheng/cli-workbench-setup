@@ -5,11 +5,12 @@ NO_PROFILE=0
 NO_SSH=0
 NODE_MAJOR="${NODE_MAJOR:-24}"
 CLI_USER="${CLI_USER:-dev}"           # unprivileged user to create + install for
-CLI_PASSWORD="${CLI_PASSWORD:-dev}"   # console login password set on first run
+CLI_PASSWORD="${CLI_PASSWORD:-}"      # console login password; empty => auto-generate
 REPO_RAW_BASE="https://raw.githubusercontent.com/sunsheng/windows-cli-setup/main"
 SSH_PORTS=(58888)   # listen on 58888 only; port 22 dropped to dodge SSH brute-force
 APT_UPDATED=0
-PASSWORD_SET=0      # set to 1 by setup_target_user when it assigns a password
+PASSWORD_SET=0        # set to 1 by setup_target_user when it assigns a password
+PASSWORD_GENERATED=0  # set to 1 when that password was randomly generated
 
 usage() {
     cat <<'EOF'
@@ -32,7 +33,8 @@ Environment:
                  Defaults to 24.
   CLI_USER       Unprivileged user to create and install for. Defaults to dev.
   CLI_PASSWORD   Console login password assigned to CLI_USER on first run (only
-                 when the account has no password yet). Defaults to dev.
+                 when the account has no password yet). If unset, a random
+                 password is generated and printed once at the end.
 EOF
 }
 
@@ -41,6 +43,17 @@ skip() { printf '    (skip) %s\n' "$*"; }
 warn() { printf '\033[33mWARNING: %s\033[0m\n' "$*" >&2; }
 die() { printf '\033[31mERROR: %s\033[0m\n' "$*" >&2; exit 1; }
 command_exists() { command -v "$1" >/dev/null 2>&1; }
+
+# Print a ~20-char alphanumeric password. Prefers openssl; falls back to reading a
+# fixed chunk of /dev/urandom (read a finite amount up front so no stage in the
+# pipe is SIGPIPE'd, which would otherwise trip pipefail).
+generate_password() {
+    if command_exists openssl; then
+        openssl rand -base64 24 | LC_ALL=C tr -dc 'A-Za-z0-9' | cut -c1-20
+    else
+        head -c 400 /dev/urandom | LC_ALL=C tr -dc 'A-Za-z0-9' | cut -c1-20
+    fi
+}
 
 while (($#)); do
     case "$1" in
@@ -159,12 +172,18 @@ setup_target_user() {
     # Give the account a console login password. Only set one when it currently
     # has none (passwd -S status != P): adduser --disabled-password leaves it
     # locked ("L"), but a re-run must never clobber a password you have changed.
+    # When CLI_PASSWORD is unset, generate a random one and surface it at the end.
     local pwstatus
     pwstatus="$(passwd -S "$CLI_USER" 2>/dev/null | awk '{print $2}')"
     if [[ "$pwstatus" != "P" ]]; then
+        if [[ -z "$CLI_PASSWORD" ]]; then
+            CLI_PASSWORD="$(generate_password)"
+            [[ -n "$CLI_PASSWORD" ]] || die "Failed to generate a console password."
+            PASSWORD_GENERATED=1
+        fi
         printf '%s:%s\n' "$CLI_USER" "$CLI_PASSWORD" | chpasswd
         PASSWORD_SET=1
-        printf '    Set console login password for %s (change it after first login: passwd).\n' "$CLI_USER"
+        printf '    Set console login password for %s (printed in the summary below).\n' "$CLI_USER"
     else
         skip "User '$CLI_USER' already has a login password."
     fi
@@ -673,7 +692,9 @@ configure_ssh
 
 printf '\n'
 step "Done! Environment installed for user '$CLI_USER'."
-if [[ "$PASSWORD_SET" -eq 1 ]]; then
+if [[ "$PASSWORD_SET" -eq 1 && "$PASSWORD_GENERATED" -eq 1 ]]; then
+    printf '  Console (VNC/serial) login:  %s / %s   <-- RANDOM, save it now (change: passwd)\n' "$CLI_USER" "$CLI_PASSWORD"
+elif [[ "$PASSWORD_SET" -eq 1 ]]; then
     printf '  Console (VNC/serial) login:  %s / %s   (change it: passwd)\n' "$CLI_USER" "$CLI_PASSWORD"
 else
     printf '  Console (VNC/serial) login:  %s / <existing password unchanged>\n' "$CLI_USER"

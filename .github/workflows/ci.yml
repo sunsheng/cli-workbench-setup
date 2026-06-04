@@ -117,8 +117,9 @@ jobs:
           # The installer must run as root; it creates CLI_USER and installs the
           # whole environment for them in one pass. --no-ssh so CI never touches
           # the runner's sshd. `env -u SUDO_USER` mimics a direct root login.
-          sudo env -u SUDO_USER CLI_USER=ciuser CLI_PASSWORD=ciuser-pw \
-            bash ./install-ubuntu.sh --no-ssh
+          # No CLI_PASSWORD: exercise the random-password path. The verify step
+          # only asserts a password got set (passwd -S status P), not its value.
+          sudo env -u SUDO_USER CLI_USER=ciuser bash ./install-ubuntu.sh --no-ssh
 
       - name: Verify user, group, and passwordless sudo
         shell: bash

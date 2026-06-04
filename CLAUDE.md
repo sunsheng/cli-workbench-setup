@@ -74,7 +74,7 @@ This matters because Claude Code refuses `--dangerously-skip-permissions` under 
 
 `setup_target_user` (called first, before any install step) creates/reuses `CLI_USER`, gives it passwordless sudo, and crucially makes the box recoverable after SSH is hardened to 58888/key-only:
 
-- It sets a **console login password** (`CLI_PASSWORD`, default `dev`) via `chpasswd`, but **only when the account has none yet** (`passwd -S` status `!= P`) so a re-run never clobbers a password you changed. This is what lets you log in on the **VNC / cloud serial console** — a console has no SSH key, so without a password a locked (`--disabled-password`) account is unreachable there.
+- It sets a **console login password** via `chpasswd`, but **only when the account has none yet** (`passwd -S` status `!= P`) so a re-run never clobbers a password you changed. `CLI_PASSWORD` overrides it; when unset, `generate_password` makes a random ~20-char one (openssl, else `/dev/urandom`) and the final summary prints it once. This is what lets you log in on the **VNC / cloud serial console** — a console has no SSH key, so without a password a locked (`--disabled-password`) account is unreachable there.
 - It creates `~/.ssh` (0700) and an empty `~/.ssh/authorized_keys` (0600), owned by `CLI_USER`, ready for you to paste a public key to enable key-only SSH on 58888.
 
 Because the console password is the recovery path, `configure_ssh` runs in the *same pass* (no forced `--no-ssh`): locking SSH to 58888/key-only with an empty `authorized_keys` is safe since you can still get in via the console to drop your key. The old `maybe_bootstrap_user` re-exec model (re-running the script over stdin as the new user, forcing `--no-ssh`) is gone.

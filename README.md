@@ -92,7 +92,7 @@ claude --dangerously-skip-permissions
 bash ./install-ubuntu.sh --no-profile      # 只装工具，不安装 bash/vim 配置
 bash ./install-ubuntu.sh --no-ssh          # 不安装/配置 OpenSSH Server
 CLI_USER=alice bash ./install-ubuntu.sh    # 指定自动创建的用户名（默认 dev）
-CLI_PASSWORD=secret bash ./install-ubuntu.sh  # 指定该用户的控制台登录密码（默认 dev）
+CLI_PASSWORD=secret bash ./install-ubuntu.sh  # 指定控制台登录密码（不指定则随机生成并打印）
 NODE_MAJOR=22 bash ./install-ubuntu.sh     # 如需固定到 Node.js 22.x
 ```
 
@@ -100,7 +100,7 @@ NODE_MAJOR=22 bash ./install-ubuntu.sh     # 如需固定到 Node.js 22.x
 
 1. 用 `adduser --disabled-password` 创建用户（不存在才创建），加入 `sudo` 组。
 2. 写入 `/etc/sudoers.d/90-<user>-nopasswd`（`NOPASSWD:ALL`，`0440`），落盘前后都用 `visudo` 校验，避免写坏锁死 sudo。
-3. **设置控制台登录密码**（`CLI_PASSWORD`，默认 `dev`），仅在该账户当前没有密码时设置（再次运行不会覆盖你改过的密码）。这样即使 SSH 已加固为 58888/仅密钥，仍可在 **VNC / 云串口控制台**用密码登录（控制台没有 SSH 密钥）。**首次登录后请用 `passwd` 改掉默认密码。**
+3. **设置控制台登录密码**，仅在该账户当前没有密码时设置（再次运行不会覆盖你改过的密码）。不指定 `CLI_PASSWORD` 时**随机生成一个强密码，并在脚本结尾打印一次**（请当场记下）；也可用 `CLI_PASSWORD=...` 自定。这样即使 SSH 已加固为 58888/仅密钥，仍可在 **VNC / 云串口控制台**用密码登录（控制台没有 SSH 密钥）。建议首次登录后用 `passwd` 再改一次。
 4. 创建 `~/.ssh`（`0700`）与空的 `~/.ssh/authorized_keys`（`0600`，属主为该用户），把你的公钥粘进去即可用密钥从 58888 登录。
 5. 由于有控制台密码兜底，SSH 加固在**同一次执行**内完成（不再强制 `--no-ssh`）：即便 `authorized_keys` 为空也不会把自己锁死——可从控制台登录再补公钥。
 
