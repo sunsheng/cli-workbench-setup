@@ -171,6 +171,13 @@ jobs:
           # authorized_keys must exist, be empty, 0600, owned by ciuser.
           ak=$(sudo stat -c '%a %U %s' /home/ciuser/.ssh/authorized_keys)
           if [[ "$ak" != "600 ciuser 0" ]]; then echo "::error::authorized_keys wrong: $ak"; rc=1; fi
+          for dir in /home/ciuser/.local /home/ciuser/.local/bin /home/ciuser/.local/share; do
+            owner=$(sudo stat -c '%U' "$dir" 2>/dev/null || true)
+            if [[ "$owner" != "ciuser" ]]; then echo "::error::$dir owner wrong: $owner"; rc=1; fi
+          done
+          if ! sudo -u ciuser -H bash -c 'mkdir -p "$HOME/.local/share/cli-setup-ci"'; then
+            echo "::error::ciuser cannot write to ~/.local/share"; rc=1
+          fi
           if [[ $rc -eq 0 ]]; then echo "console password + ~/.ssh scaffolding OK"; fi
           exit $rc
 

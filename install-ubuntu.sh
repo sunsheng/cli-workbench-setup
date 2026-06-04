@@ -276,9 +276,46 @@ chown_target_link() {
     chown -h "$TARGET_USER:$TARGET_GROUP" "$@"
 }
 
+chown_target_dir_chain() {
+    local dir="$1" current rel part
+    if [[ "$dir" != "$TARGET_HOME" && "$dir" != "$TARGET_HOME"/* ]]; then
+        chown_target "$dir"
+        chmod u+rwx "$dir"
+        return
+    fi
+
+    current="$TARGET_HOME"
+    chown_target "$current"
+    chmod u+rwx "$current"
+
+    rel="${dir#"$TARGET_HOME"}"
+    rel="${rel#/}"
+    while [[ -n "$rel" ]]; do
+        part="${rel%%/*}"
+        if [[ "$part" == "$rel" ]]; then
+            rel=""
+        else
+            rel="${rel#*/}"
+        fi
+        [[ -z "$part" || "$part" == "." || "$part" == ".." ]] && continue
+        current="$current/$part"
+        chown_target "$current"
+        chmod u+rwx "$current"
+    done
+}
+
 target_mkdir() {
     mkdir -p "$1"
-    chown_target "$1"
+    chown_target_dir_chain "$1"
+}
+
+prepare_user_state_dirs() {
+    step "Preparing user-scoped state directories..."
+    target_mkdir "$TARGET_HOME/.local"
+    target_mkdir "$TARGET_HOME/.local/bin"
+    target_mkdir "$TARGET_HOME/.local/share"
+    target_mkdir "$TARGET_HOME/.cache"
+    target_mkdir "$TARGET_HOME/.config"
 }
 
 install_user_file() {
@@ -684,6 +721,7 @@ configure_ssh() {
 }
 
 setup_target_user
+prepare_user_state_dirs
 configure_locale
 install_tools
 install_profile
