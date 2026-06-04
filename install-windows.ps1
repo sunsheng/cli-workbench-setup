@@ -320,9 +320,9 @@ function Install-CodexCli {
 
     $oldNonInteractive = $env:CODEX_NON_INTERACTIVE
     try {
-        if ([Console]::IsInputRedirected -or [Console]::IsOutputRedirected) {
-            $env:CODEX_NON_INTERACTIVE = '1'
-        }
+        # The official installer can offer to launch Codex after installation.
+        # This setup script only installs tools; configuration/login stays manual.
+        $env:CODEX_NON_INTERACTIVE = '1'
         Invoke-OfficialPowerShellInstaller -Uri 'https://chatgpt.com/codex/install.ps1'
     } catch {
         Write-Warning "Codex official installer failed; falling back to npm: $($_.Exception.Message)"
