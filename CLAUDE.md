@@ -21,8 +21,10 @@ There is no build and no unit-test framework. Validation = lint + a real install
 Lint (run before pushing):
 
 ```bash
-# Bash side
+# Bash/zsh side
 bash -n install-ubuntu.sh profiles/ubuntu-bashrc
+zsh -n profiles/ubuntu-zprofile
+zsh -n profiles/ubuntu-zshrc
 shellcheck -s bash install-ubuntu.sh profiles/ubuntu-bashrc
 ```
 
@@ -38,7 +40,7 @@ Run an installer locally (both are safe to re-run — every step checks for an e
 
 ```bash
 bash ./install-ubuntu.sh                 # full run
-bash ./install-ubuntu.sh --no-profile    # tools only, no bash/vim config
+bash ./install-ubuntu.sh --no-profile    # tools only, no shell/vim config
 bash ./install-ubuntu.sh --no-ssh        # skip OpenSSH config
 NODE_MAJOR=22 bash ./install-ubuntu.sh   # pin Node major version
 ```
@@ -85,6 +87,6 @@ Because the console password is the recovery path, `configure_ssh` runs in the *
 
 ## Shell profiles
 
-Git shortcuts (`gst`, `gd`, `gdca`, `glog`, `glola`, `gsh`, …) are **shell functions/aliases shipped in the profile** (`profiles/ubuntu-bashrc`, `profiles/powershell-profile.ps1`) — they are intentionally *not* written to `~/.gitconfig`. The bash profile is installed to `~/.bashrc.d/cli-setup.bash` and sourced via an idempotent block appended to `~/.bashrc`. Existing target files are backed up to `*.bak-<timestamp>` before overwrite.
+Git shortcuts (`gst`, `gd`, `gdca`, `glog`, `glola`, `gsh`, …) are **shell functions/aliases shipped in the profile** (`profiles/ubuntu-zshrc`, `profiles/ubuntu-bashrc`, `profiles/powershell-profile.ps1`) — they are intentionally *not* written to `~/.gitconfig`. Ubuntu installs zsh as the default login shell for `CLI_USER`, writes `~/.zprofile` / `~/.zshrc`, and still installs the bash profile to `~/.bashrc.d/cli-setup.bash` with an idempotent source block appended to `~/.bashrc`. Existing target files are backed up to `*.bak-<timestamp>` before overwrite.
 
 Nerd Fonts are **never installed on the server** — icon glyphs are rendered by the *client* terminal, so fonts belong on the client (README documents client setup).

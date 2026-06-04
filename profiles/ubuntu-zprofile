@@ -1,0 +1,7 @@
+# Login shell PATH setup for zsh.
+typeset -U path PATH
+
+[[ -d "$HOME/.local/bin" ]] && path=("$HOME/.local/bin" $path)
+[[ -d "$HOME/bin" ]] && path=("$HOME/bin" $path)
+
+export PATH

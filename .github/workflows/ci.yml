@@ -54,14 +54,17 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y zsh
           bash -n install-ubuntu.sh
           bash -n profiles/ubuntu-bashrc
+          zsh -n profiles/ubuntu-zprofile
+          zsh -n profiles/ubuntu-zshrc
 
       - name: ShellCheck
         shell: bash
         run: |
           set -euo pipefail
-          sudo apt-get update
           sudo apt-get install -y shellcheck
           shellcheck -s bash install-ubuntu.sh profiles/ubuntu-bashrc
 
@@ -175,6 +178,18 @@ jobs:
             exit $rc
           '
 
+      - name: Verify default shell is zsh
+        shell: bash
+        run: |
+          set -euo pipefail
+          shell_path="$(getent passwd ciuser | cut -d: -f7)"
+          if [[ "$shell_path" != "/usr/bin/zsh" ]]; then
+            echo "::error::ciuser default shell is $shell_path, expected /usr/bin/zsh"
+            exit 1
+          fi
+          sudo -iu ciuser zsh -lc 'test "$SHELL" = /usr/bin/zsh; test "$ZSH_VERSION" != ""'
+          echo "default shell is zsh"
+
       - name: Verify bash profile loads cleanly (as ciuser)
         shell: bash
         run: |
@@ -190,19 +205,32 @@ jobs:
             done
           '
 
-      - name: Verify Ubuntu fzf key bindings (as ciuser)
+      - name: Verify zsh profile loads cleanly (as ciuser)
         shell: bash
         run: |
           set -uo pipefail
-          sudo -u ciuser -H bash -ic '
+          sudo -u ciuser -H zsh -ic '
+            export PATH="$HOME/.local/bin:$PATH"
+            for name in l ll gst gd gdca glog gsh; do
+              type "$name" >/dev/null
+              echo "OK: $name"
+            done
+            command -v zoxide >/dev/null
+          '
+
+      - name: Verify Ubuntu zsh fzf configuration (as ciuser)
+        shell: bash
+        run: |
+          set -uo pipefail
+          sudo -u ciuser -H zsh -ic '
             set -e
             export PATH="$HOME/.local/bin:$PATH"
-            test -r "$HOME/.bashrc.d/cli-setup.bash"
-            grep -F "key-bindings.bash" "$HOME/.bashrc.d/cli-setup.bash" >/dev/null
-            grep -F "completion.bash" "$HOME/.bashrc.d/cli-setup.bash" >/dev/null
-            if [[ ! -r /usr/share/doc/fzf/examples/key-bindings.bash && ! -r /usr/share/fzf/key-bindings.bash ]]; then
-              echo "::error::fzf key-bindings.bash was not installed"; exit 1
+            test -r "$HOME/.zshrc"
+            grep -F "key-bindings.zsh" "$HOME/.zshrc" >/dev/null
+            grep -F "completion.zsh" "$HOME/.zshrc" >/dev/null
+            if [[ ! -r /usr/share/doc/fzf/examples/key-bindings.zsh && ! -r /usr/share/fzf/key-bindings.zsh ]]; then
+              echo "::error::fzf key-bindings.zsh was not installed"; exit 1
             fi
-            source "$HOME/.bashrc.d/cli-setup.bash"
-            echo "fzf Ctrl+T/Ctrl+R bindings loaded"
+            source "$HOME/.zshrc"
+            echo "zsh fzf Ctrl+T/Ctrl+R configuration loaded"
           '

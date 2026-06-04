@@ -24,7 +24,7 @@ a console login password, prepares an empty ~/.ssh/authorized_keys, and installs
 the whole environment for that user. There is no self-bootstrap / re-exec.
 
 Options:
-  --no-profile   Install tools only; do not change bash/Vim profiles.
+  --no-profile   Install tools only; do not change shell/Vim profiles.
   --no-ssh       Skip OpenSSH Server installation and configuration.
   -h, --help     Show this help.
 
@@ -304,6 +304,25 @@ ensure_bashrc_source() {
     printf '    Added cli-setup source block to %s\n' "$bashrc"
 }
 
+set_default_shell() {
+    local shell_path="$1"
+    local current_shell
+
+    [[ -x "$shell_path" ]] || die "$shell_path is not executable."
+    if ! grep -Fxq "$shell_path" /etc/shells; then
+        printf '%s\n' "$shell_path" >> /etc/shells
+    fi
+
+    current_shell="$(getent passwd "$TARGET_USER" | cut -d: -f7)"
+    if [[ "$current_shell" == "$shell_path" ]]; then
+        skip "Default shell already set to $shell_path."
+        return
+    fi
+
+    run_root usermod -s "$shell_path" "$TARGET_USER"
+    printf '    Set default shell for %s to %s\n' "$TARGET_USER" "$shell_path"
+}
+
 ensure_user_bin_links() {
     step "Ensuring Debian command-name shims..."
     target_mkdir "$USER_BIN"
@@ -568,6 +587,7 @@ install_tools() {
         ripgrep
         unzip
         vim
+        zsh
         zoxide
     )
 
@@ -597,7 +617,7 @@ install_profile() {
         return
     fi
 
-    step "Installing bash profile..."
+    step "Installing shell profiles..."
     local bash_src
     if ! bash_src="$(resolve_profile_file "profiles/ubuntu-bashrc")"; then
         warn "Could not obtain profiles/ubuntu-bashrc; skipping bash profile."
@@ -605,6 +625,21 @@ install_profile() {
         install_user_file "$bash_src" "$TARGET_HOME/.bashrc.d/cli-setup.bash"
         ensure_bashrc_source
     fi
+
+    local zprofile_src zshrc_src
+    if ! zprofile_src="$(resolve_profile_file "profiles/ubuntu-zprofile")"; then
+        warn "Could not obtain profiles/ubuntu-zprofile; skipping zprofile."
+    else
+        install_user_file "$zprofile_src" "$TARGET_HOME/.zprofile"
+    fi
+
+    if ! zshrc_src="$(resolve_profile_file "profiles/ubuntu-zshrc")"; then
+        warn "Could not obtain profiles/ubuntu-zshrc; skipping zshrc."
+    else
+        install_user_file "$zshrc_src" "$TARGET_HOME/.zshrc"
+    fi
+
+    set_default_shell /usr/bin/zsh
 
     step "Installing Vim profile..."
     local vim_src
