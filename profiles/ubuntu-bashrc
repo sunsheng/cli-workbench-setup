@@ -62,3 +62,7 @@ alias gdca='git diff --cached'
 alias glog='git log --oneline --decorate --graph'
 alias glola='git log --graph --oneline --decorate --all'
 alias gsh='git show'
+
+# Skip the per-run confirmation prompts by default for this user's sessions.
+alias codex='codex --yolo'
+alias claude='claude --dangerously-skip-permissions'

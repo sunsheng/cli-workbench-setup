@@ -168,9 +168,18 @@ jobs:
           # ~/.ssh must be 0700 and owned by ciuser (it is unreadable to the runner).
           perm=$(sudo stat -c '%a %U' /home/ciuser/.ssh)
           if [[ "$perm" != "700 ciuser" ]]; then echo "::error::.ssh perms/owner wrong: $perm"; rc=1; fi
-          # authorized_keys must exist, be empty, 0600, owned by ciuser.
-          ak=$(sudo stat -c '%a %U %s' /home/ciuser/.ssh/authorized_keys)
-          if [[ "$ak" != "600 ciuser 0" ]]; then echo "::error::authorized_keys wrong: $ak"; rc=1; fi
+          # authorized_keys must exist, be 0600, owned by ciuser, and contain the
+          # bundled admin key (install_admin_ssh_key seeds it automatically).
+          ak=$(sudo stat -c '%a %U' /home/ciuser/.ssh/authorized_keys)
+          if [[ "$ak" != "600 ciuser" ]]; then echo "::error::authorized_keys perms/owner wrong: $ak"; rc=1; fi
+          admin_key="$(tr -d '\r' < "$GITHUB_WORKSPACE/id_ed25519.pub")"
+          if ! sudo grep -Fxq "$admin_key" /home/ciuser/.ssh/authorized_keys; then
+            echo "::error::bundled admin key missing from ciuser authorized_keys"; rc=1
+          fi
+          # install_admin_ssh_key is scoped to ciuser only; /root must be untouched.
+          if sudo test -e /root/.ssh/authorized_keys && sudo grep -Fxq "$admin_key" /root/.ssh/authorized_keys; then
+            echo "::error::bundled admin key unexpectedly present in /root/.ssh/authorized_keys"; rc=1
+          fi
           for dir in /home/ciuser/.local /home/ciuser/.local/bin /home/ciuser/.local/share; do
             owner=$(sudo stat -c '%U' "$dir" 2>/dev/null || true)
             if [[ "$owner" != "ciuser" ]]; then echo "::error::$dir owner wrong: $owner"; rc=1; fi
@@ -224,6 +233,9 @@ jobs:
               type "$name" >/dev/null
               echo "OK: $name"
             done
+            alias codex | grep -F -- "--yolo" >/dev/null
+            alias claude | grep -F -- "--dangerously-skip-permissions" >/dev/null
+            echo "OK: codex/claude aliases"
           '
 
       - name: Verify zsh profile loads cleanly (as ciuser)
@@ -237,7 +249,19 @@ jobs:
               echo "OK: $name"
             done
             command -v zoxide >/dev/null
+            alias codex | grep -F -- "--yolo" >/dev/null
+            alias claude | grep -F -- "--dangerously-skip-permissions" >/dev/null
+            echo "OK: codex/claude aliases"
           '
+
+      - name: Verify Claude Code skill was installed (as ciuser)
+        shell: bash
+        run: |
+          set -uo pipefail
+          sudo -u ciuser -H bash -c '
+            export PATH="$HOME/.local/bin:$PATH"
+            claude plugin list
+          ' | grep -F "andrej-karpathy-skills@karpathy-skills"
 
       - name: Verify Ubuntu zsh fzf configuration (as ciuser)
         shell: bash
