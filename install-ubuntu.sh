@@ -21,8 +21,10 @@ One-shot setup for a modern Ubuntu Server command-line environment.
 
 Must be run as root (whoami must be root). In a single pass it creates an
 unprivileged user (claude refuses to run as root), gives it passwordless sudo and
-a console login password, prepares an empty ~/.ssh/authorized_keys, and installs
-the whole environment for that user. There is no self-bootstrap / re-exec.
+a console login password, adds the bundled id_ed25519.pub to that user's
+~/.ssh/authorized_keys, and installs the whole environment (including the
+andrej-karpathy-skills Claude Code plugin) for that user. There is no
+self-bootstrap / re-exec.
 
 Options:
   --no-profile   Install tools only; do not change shell/Vim profiles.
@@ -194,9 +196,9 @@ setup_target_user() {
         skip "User '$CLI_USER' already has a login password."
     fi
 
-    # Prepare an empty ~/.ssh/authorized_keys with correct ownership/permissions
-    # so you can paste a public key in for key-based SSH (password login is also
-    # enabled, so this is optional).
+    # Prepare ~/.ssh/authorized_keys with correct ownership/permissions.
+    # install_admin_ssh_key (run right after this function) seeds it with the
+    # bundled id_ed25519.pub; this just makes sure the file/dir exist first.
     local ssh_dir="$TARGET_HOME/.ssh" auth_keys="$TARGET_HOME/.ssh/authorized_keys"
     install -d -m 0700 -o "$CLI_USER" -g "$TARGET_GROUP" "$ssh_dir"
     if [[ -e "$auth_keys" ]]; then
@@ -205,7 +207,36 @@ setup_target_user() {
         skip "authorized_keys already exists for '$CLI_USER'."
     else
         install -m 0600 -o "$CLI_USER" -g "$TARGET_GROUP" /dev/null "$auth_keys"
-        printf '    Created empty %s (add your public key here).\n' "$auth_keys"
+        printf '    Created empty %s\n' "$auth_keys"
+    fi
+}
+
+# Add the bundled id_ed25519.pub to CLI_USER's authorized_keys, so the
+# machine is reachable by key immediately (in addition to the console/SSH
+# password already set up above). Best-effort: a missing key file only
+# warns, since password login still works.
+install_admin_ssh_key() {
+    step "Installing bundled admin SSH public key..."
+    local key_src key_line
+    if ! key_src="$(resolve_profile_file "id_ed25519.pub")"; then
+        warn "Could not obtain id_ed25519.pub; skipping admin key installation."
+        return
+    fi
+
+    key_line="$(tr -d '\r' < "$key_src" | grep -Ev '^[[:space:]]*(#|$)' | head -n1)"
+    if [[ -z "$key_line" ]]; then
+        warn "id_ed25519.pub is empty; skipping admin key installation."
+        return
+    fi
+
+    local auth_keys="$TARGET_HOME/.ssh/authorized_keys"
+    if grep -Fxq "$key_line" "$auth_keys" 2>/dev/null; then
+        skip "Public key already present in $auth_keys."
+    else
+        printf '%s\n' "$key_line" >> "$auth_keys"
+        chown "$TARGET_USER:$TARGET_GROUP" "$auth_keys"
+        chmod 0600 "$auth_keys"
+        printf '    Added public key to %s\n' "$auth_keys"
     fi
 }
 
@@ -548,6 +579,30 @@ install_claude_code_cli() {
     command_exists claude || die "claude was not found after installation."
 }
 
+# Installs the andrej-karpathy-skills plugin (user scope) for CLI_USER. Runs
+# last, after everything else, since it depends on the claude CLI being
+# installed. Both subcommands are idempotent (they no-op with exit 0 if the
+# marketplace/plugin is already present) and default to --scope user already.
+# Best-effort: a network/marketplace failure only warns, it must not fail the
+# whole install over an optional skill.
+install_claude_skill() {
+    step "Installing Claude Code skill (andrej-karpathy-skills)..."
+    export PATH="$USER_BIN:$PATH"
+    if ! command_exists claude; then
+        warn "claude CLI not found; skipping Claude skill installation."
+        return
+    fi
+
+    if ! run_target_user claude plugin marketplace add forrestchang/andrej-karpathy-skills; then
+        warn "Failed to add the karpathy-skills marketplace; skipping skill install."
+        return
+    fi
+
+    if ! run_target_user claude plugin install andrej-karpathy-skills@karpathy-skills; then
+        warn "Failed to install andrej-karpathy-skills@karpathy-skills."
+    fi
+}
+
 ensure_locale_line() {
     local loc="$1"
     local line="$loc UTF-8"
@@ -721,11 +776,13 @@ configure_ssh() {
 }
 
 setup_target_user
+install_admin_ssh_key
 prepare_user_state_dirs
 configure_locale
 install_tools
 install_profile
 configure_ssh
+install_claude_skill
 
 printf '\n'
 step "Done! Environment installed for user '$CLI_USER'."
@@ -737,5 +794,6 @@ else
     printf '  Login password:  %s / <existing password unchanged>\n' "$CLI_USER"
 fi
 printf '  SSH (password or key) on port %s:  ssh -p %s %s@<host>\n' "${SSH_PORTS[0]}" "${SSH_PORTS[0]}" "$CLI_USER"
-printf '  (optional) add a key to %s/.ssh/authorized_keys for key-based login.\n' "$TARGET_HOME"
-printf '  Become the user:  sudo -iu %s   then run:  claude --dangerously-skip-permissions\n' "$CLI_USER"
+printf '  Bundled id_ed25519.pub was added to %s/.ssh/authorized_keys.\n' "$TARGET_HOME"
+printf '  Claude Code skill installed: andrej-karpathy-skills@karpathy-skills\n'
+printf '  Become the user:  sudo -iu %s   then run:  claude   (aliased to --dangerously-skip-permissions)\n' "$CLI_USER"
