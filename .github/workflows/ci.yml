@@ -213,8 +213,10 @@ jobs:
         run: |
           set -uo pipefail
           rc=0
-          name="$(sudo -u ciuser -H git config --global user.name || true)"
-          email="$(sudo -u ciuser -H git config --global user.email || true)"
+          # cd to ciuser's HOME first: the checkout dir is unreadable to ciuser,
+          # and git fatals on getcwd() before it ever reads the global config.
+          name="$(sudo -u ciuser -H bash -c 'cd "$HOME" && git config --global user.name' || true)"
+          email="$(sudo -u ciuser -H bash -c 'cd "$HOME" && git config --global user.email' || true)"
           if [[ "$name" != "sunsheng" ]]; then echo "::error::git user.name is '$name', expected sunsheng"; rc=1; fi
           if [[ "$email" != "sunsheng4214@gmail.com" ]]; then echo "::error::git user.email is '$email', expected sunsheng4214@gmail.com"; rc=1; fi
           if [[ $rc -eq 0 ]]; then echo "git identity OK: $name <$email>"; fi
