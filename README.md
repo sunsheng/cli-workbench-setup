@@ -58,9 +58,12 @@ bash ./install-ubuntu.sh --no-ssh              # 跳过 OpenSSH Server 配置
 CLI_USER=alice bash ./install-ubuntu.sh        # 指定自动创建的普通用户，默认 dev
 CLI_PASSWORD=secret bash ./install-ubuntu.sh   # 指定登录密码（控制台与 SSH 通用）
 NODE_MAJOR=22 bash ./install-ubuntu.sh         # 指定 Node.js 主版本，默认 24
+GIT_USER_NAME="Your Name" GIT_USER_EMAIL=you@example.com bash ./install-ubuntu.sh   # 指定 git 身份
 ```
 
 如果未指定 `CLI_PASSWORD`，脚本会生成随机密码（8–10 位，大小写字母与数字，无特殊字符及易混淆字符 `0 1 O o I l i`）。该密码会在执行末尾打印一次，并保存到目标用户家目录下的 `~/.cli-setup-password`（权限 `0600`，属主为该用户），方便日后查看；建议用 `passwd` 修改。
+
+> 脚本会为目标用户配置 git 身份（`~/.gitconfig` 的 `user.name` / `user.email`），默认 `sunsheng` / `sunsheng4214@gmail.com`，可用 `GIT_USER_NAME` / `GIT_USER_EMAIL` 覆盖。该步骤幂等：若已是目标值则跳过，否则写入。此处只配置身份，git 查看类快捷方式（`gst`、`gd` 等）仍是 shell 函数/别名，不写入 `~/.gitconfig`。
 
 > 仓库根目录下的 `id_ed25519.pub` 是随脚本一起分发的管理公钥，会被自动追加到目标用户的 `authorized_keys`（已存在则跳过，不会重复添加）。如果不想让这把公钥获得访问权限，替换仓库中的 `id_ed25519.pub` 为你自己的公钥后再运行脚本。
 
@@ -266,7 +269,7 @@ zi            # 交互式选择历史目录
 
 ### Git 查看类快捷方式
 
-这些是 shell 级别的函数或 alias，不会修改 `~/.gitconfig`：
+这些是 shell 级别的函数或 alias，不会修改 `~/.gitconfig`（Ubuntu 安装脚本另外会向 `~/.gitconfig` 写入 git 身份 `user.name` / `user.email`，见「Ubuntu」安装说明）：
 
 | 别名 | 等价命令 | 说明 |
 |------|----------|------|
@@ -372,7 +375,7 @@ GitHub Actions 会执行：
 1. Windows lint：解析 `install-windows.ps1`、`add-windows-admin-ssh-key.ps1` 和 PowerShell profile，并运行 PSScriptAnalyzer。
 2. Ubuntu lint：对 `install-ubuntu.sh` 和配置运行 `bash -n`、`zsh -n` 和 ShellCheck。
 3. Windows install：在 `windows-latest` 上执行 `.\install-windows.ps1 -NoSsh`，验证工具、Node.js、AI CLI 在 PATH 上且 `--version` 可执行，并验证 profile 和 git 快捷方式。
-4. Ubuntu install：在 `ubuntu-latest` 上从 `/root` 以 root 执行 `install-ubuntu.sh --no-ssh`，验证自动建用户、sudo、密码、SSH 文件权限、CLI、Node.js、AI CLI 在 PATH 上且 `--version` 可执行、默认 zsh、shell 配置、fzf 绑定和 git 快捷方式。
+4. Ubuntu install：在 `ubuntu-latest` 上从 `/root` 以 root 执行 `install-ubuntu.sh --no-ssh`，验证自动建用户、sudo、密码、SSH 文件权限、CLI、Node.js、AI CLI 在 PATH 上且 `--version` 可执行、默认 zsh、shell 配置、fzf 绑定、git 身份（`user.name` / `user.email`）和 git 快捷方式。
 
 ## 备注
 
