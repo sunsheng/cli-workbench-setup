@@ -6,6 +6,8 @@ NO_SSH=0
 NODE_MAJOR="${NODE_MAJOR:-24}"
 CLI_USER="${CLI_USER:-dev}"           # unprivileged user to create + install for
 CLI_PASSWORD="${CLI_PASSWORD:-}"      # console login password; empty => auto-generate
+GIT_USER_NAME="${GIT_USER_NAME:-sunsheng}"                  # git user.name for CLI_USER
+GIT_USER_EMAIL="${GIT_USER_EMAIL:-sunsheng4214@gmail.com}"  # git user.email for CLI_USER
 REPO_RAW_BASE="https://raw.githubusercontent.com/sunsheng/cli-workbench-setup/main"
 SSH_PORTS=(58888)   # listen on 58888 only; port 22 dropped to dodge SSH brute-force
 APT_UPDATED=0
@@ -38,6 +40,9 @@ Environment:
   CLI_PASSWORD   Console login password assigned to CLI_USER on first run (only
                  when the account has no password yet). If unset, a random
                  password is generated and printed once at the end.
+  GIT_USER_NAME  git user.name configured for CLI_USER. Defaults to sunsheng.
+  GIT_USER_EMAIL git user.email configured for CLI_USER.
+                 Defaults to sunsheng4214@gmail.com.
 EOF
 }
 
@@ -603,6 +608,38 @@ install_claude_skill() {
     fi
 }
 
+# Set git user.name / user.email in CLI_USER's global config (~/.gitconfig).
+# User-scoped (run_target_user), so it lands in the target user's home, not
+# root's. Idempotent: skips when the value already matches the desired one, so a
+# re-run is a no-op; only rewrites when unset or different. Git shortcuts (gst,
+# gd, ...) stay shell functions in the profile and are deliberately NOT written
+# here -- this configures identity only.
+configure_git() {
+    step "Configuring git identity for '$TARGET_USER'..."
+    if ! command_exists git; then
+        warn "git not found; skipping git identity configuration."
+        return
+    fi
+
+    local current_name current_email
+    current_name="$(run_target_user git config --global user.name 2>/dev/null || true)"
+    current_email="$(run_target_user git config --global user.email 2>/dev/null || true)"
+
+    if [[ "$current_name" == "$GIT_USER_NAME" ]]; then
+        skip "git user.name already set to '$GIT_USER_NAME'."
+    else
+        run_target_user git config --global user.name "$GIT_USER_NAME"
+        printf '    Set git user.name to %s\n' "$GIT_USER_NAME"
+    fi
+
+    if [[ "$current_email" == "$GIT_USER_EMAIL" ]]; then
+        skip "git user.email already set to '$GIT_USER_EMAIL'."
+    else
+        run_target_user git config --global user.email "$GIT_USER_EMAIL"
+        printf '    Set git user.email to %s\n' "$GIT_USER_EMAIL"
+    fi
+}
+
 ensure_locale_line() {
     local loc="$1"
     local line="$loc UTF-8"
@@ -780,6 +817,7 @@ install_admin_ssh_key
 prepare_user_state_dirs
 configure_locale
 install_tools
+configure_git
 install_profile
 configure_ssh
 install_claude_skill
@@ -796,4 +834,5 @@ fi
 printf '  SSH (password or key) on port %s:  ssh -p %s %s@<host>\n' "${SSH_PORTS[0]}" "${SSH_PORTS[0]}" "$CLI_USER"
 printf '  Bundled id_ed25519.pub was added to %s/.ssh/authorized_keys.\n' "$TARGET_HOME"
 printf '  Claude Code skill installed: andrej-karpathy-skills@karpathy-skills\n'
+printf '  git identity:  %s <%s>\n' "$GIT_USER_NAME" "$GIT_USER_EMAIL"
 printf '  Become the user:  sudo -iu %s   then run:  claude   (aliased to --dangerously-skip-permissions)\n' "$CLI_USER"

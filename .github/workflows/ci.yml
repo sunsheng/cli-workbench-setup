@@ -208,6 +208,18 @@ jobs:
             exit $rc
           '
 
+      - name: Verify git identity (as ciuser)
+        shell: bash
+        run: |
+          set -uo pipefail
+          rc=0
+          name="$(sudo -u ciuser -H git config --global user.name || true)"
+          email="$(sudo -u ciuser -H git config --global user.email || true)"
+          if [[ "$name" != "sunsheng" ]]; then echo "::error::git user.name is '$name', expected sunsheng"; rc=1; fi
+          if [[ "$email" != "sunsheng4214@gmail.com" ]]; then echo "::error::git user.email is '$email', expected sunsheng4214@gmail.com"; rc=1; fi
+          if [[ $rc -eq 0 ]]; then echo "git identity OK: $name <$email>"; fi
+          exit $rc
+
       - name: Verify default shell is zsh
         shell: bash
         run: |
